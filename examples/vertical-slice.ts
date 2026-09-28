@@ -73,8 +73,16 @@ await runAgent({
   model: visible,
   tools,
   executor: runtime,
+  // Apply the learned decoding profile for the tool the demo drives.
+  decoding: runtime.decodingProvider(LLAMA_CPP_CAPABILITIES, {
+    toolName: "deploy_service",
+    serverName: "demo",
+  }),
   messages: [{ role: "user", content: "deploy prod" }],
   onEvent: (event) => {
+    if (event.type === "decoding_applied") {
+      console.log(`· applied decoding ${JSON.stringify(event.params)}`);
+    }
     if (event.type === "tool_call") console.log(`→ ${event.call.name}(${JSON.stringify(event.call.input)})`);
     if (event.type === "tool_result") console.log(event.result.ok ? "✓ ok" : `✗ ${event.result.error}`);
     if (event.type === "assistant_text") console.log(event.text);

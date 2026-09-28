@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatModel,
   ChatParams,
+  DecodingProvider,
   ToolSpec,
 } from "../types.js";
 
@@ -17,6 +18,12 @@ export interface RunAgentOptions {
   messages: ChatMessage[];
   maxSteps?: number;
   params?: ChatParams;
+  /**
+   * Optional per-step decoding overrides (e.g. from
+   * `AgentRuntime.decodingProvider`). Merged over `params` for each completion,
+   * and reported as a `decoding_applied` event.
+   */
+  decoding?: DecodingProvider;
   onEvent?: AgentEventListener;
 }
 
@@ -32,7 +39,13 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
   const emit = (event: AgentEvent): void => options.onEvent?.(event);
 
   for (let step = 0; step < maxSteps; step += 1) {
-    const chat = await options.model.step(messages, options.tools, options.params);
+    const decoded = options.decoding
+      ? await options.decoding({ step, messages, tools: options.tools })
+      : undefined;
+    const params = decoded ? { ...options.params, ...decoded } : options.params;
+    if (decoded) emit({ type: "decoding_applied", params: params ?? {}, step });
+
+    const chat = await options.model.step(messages, options.tools, params);
     if (chat.text) emit({ type: "assistant_text", text: chat.text, step });
 
     if (chat.toolCalls.length === 0) {

@@ -6,6 +6,8 @@
  * MCP SDK live behind those two seams.
  */
 
+import type { ModelCapabilities } from "@adaptivemcp/spec";
+
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 export interface ToolCall {
@@ -36,10 +38,20 @@ export interface ToolSpec {
   serverName?: string;
 }
 
+/**
+ * Decoding parameters for one completion. Keys mirror
+ * `ResolvedDecodingSettings` (from `@adaptivemcp/spec`) so a host can apply an
+ * Adaptive MCP decoding recommendation directly; `maxOutputTokens` is the
+ * agent's own budget knob and is never set by the advisor.
+ */
 export interface ChatParams {
   temperature?: number;
   topP?: number;
   topK?: number;
+  minP?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  repetitionPenalty?: number;
   maxOutputTokens?: number;
 }
 
@@ -58,8 +70,33 @@ export interface ChatStep {
 /** The provider seam. Implemented by the AI SDK adapter and a scripted model. */
 export interface ChatModel {
   readonly name: string;
+  /**
+   * Decoding knobs this backend actually exposes (see `@adaptivemcp/spec`
+   * `ModelCapabilities`). The host resolves an Adaptive MCP decoding profile
+   * against this, so unsupported knobs are dropped rather than approximated.
+   */
+  readonly capabilities?: ModelCapabilities;
   step(messages: ChatMessage[], tools: ToolSpec[], params?: ChatParams): Promise<ChatStep>;
 }
+
+/**
+ * Context handed to a `DecodingProvider` before each completion, so the host can
+ * decide which learned decoding profile (if any) to apply to this step.
+ */
+export interface DecodingRequest {
+  step: number;
+  messages: ChatMessage[];
+  tools: ToolSpec[];
+}
+
+/**
+ * Supplies decoding overrides for the next completion. Returning `undefined`
+ * means "use the loop's static `params`". The agent owns its LLM call, so this
+ * is where a `suggestDecoding()` recommendation actually gets applied.
+ */
+export type DecodingProvider = (
+  request: DecodingRequest,
+) => ChatParams | undefined | Promise<ChatParams | undefined>;
 
 export interface ToolExecutionResult {
   ok: boolean;
@@ -82,6 +119,7 @@ export interface AgentRunResult {
 
 export type AgentEvent =
   | { type: "assistant_text"; text: string; step: number }
+  | { type: "decoding_applied"; params: ChatParams; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
   | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };
 

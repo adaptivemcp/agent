@@ -4,7 +4,20 @@ import { InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
 import { ScriptedModel } from "../provider/scripted.js";
 import { runAgent } from "./loop.js";
-import type { AgentEvent, ToolSpec } from "../types.js";
+import type { AgentEvent, ChatMessage, ChatModel, ChatParams, ChatStep, ToolSpec } from "../types.js";
+
+/** Wraps a model to capture the params the loop passes to each completion. */
+class RecordingModel implements ChatModel {
+  readonly name = "recording";
+  readonly params: Array<ChatParams | undefined> = [];
+
+  constructor(private readonly inner: ChatModel) {}
+
+  step(messages: ChatMessage[], tools: ToolSpec[], params?: ChatParams): Promise<ChatStep> {
+    this.params.push(params);
+    return this.inner.step(messages, tools, params);
+  }
+}
 
 function toolset(failDeploys = 0): InMemoryToolset {
   let deploys = 0;
@@ -148,6 +161,54 @@ describe("agent loop", () => {
     expect(recommendation).toBeDefined();
     expect(recommendation?.profile.id).toBe("deterministic");
     expect(recommendation?.resolved.temperature).toBeTypeOf("number");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("applies a learned decoding profile to the next model step", async () => {
+    const tools = new InMemoryToolset("demo", [
+      {
+        name: "deploy_service",
+        description: "Deploy",
+        handler: () => {
+          throw new Error("always failing");
+        },
+      },
+    ]);
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s6");
+    const spec = specs[0] as ToolSpec;
+
+    for (let i = 0; i < 12; i += 1) {
+      await runtime.execute({ id: `c${i}`, name: "deploy_service", input: {} }, spec);
+    }
+
+    const model = new RecordingModel(new ScriptedModel([{ text: "done" }]));
+    const events: AgentEvent[] = [];
+    await runAgent({
+      model,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+      decoding: runtime.decodingProvider(LLAMA_CPP_CAPABILITIES),
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "decoding_applied")).toBe(true);
+    expect(model.params[0]?.temperature).toBe(0.2);
+    expect(model.params[0]?.topK).toBe(20);
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("supplies no decoding override before there is enough observed signal", async () => {
+    const tools = toolset();
+    const runtime = await runtimeFor(tools, "s7");
+
+    const provider = runtime.decodingProvider(LLAMA_CPP_CAPABILITIES);
+    expect(await provider({ step: 0, messages: [], tools: [] })).toBeUndefined();
 
     runtime.close();
     await tools.close();

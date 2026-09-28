@@ -3,9 +3,10 @@
 > **Status:** early scaffold — a working library + CLI vertical slice, not yet a
 > finished product.
 
-The product implementation of [Adaptive MCP](../adaptive-mcp): a provider-agnostic,
-MCP-native agent that **owns both the LLM completion and the tool execution**, so
-every `@adaptivemcp/*` library has a real host learning from real usage.
+The product implementation of [Adaptive MCP](https://github.com/kemalelmizan/adaptive-mcp):
+a provider-agnostic, MCP-native agent that **owns both the LLM completion and the
+tool execution**, so every `@adaptivemcp/*` library has a real host learning from
+real usage. This repository lives at <https://github.com/adaptivemcp/agent>.
 
 It consumes all Adaptive MCP libraries — `spec`, `memory`, `telemetry`,
 `evaluation`, `extension`, `runtime`, `routing`, `orchestration`, `approval`,
@@ -29,8 +30,9 @@ pnpm test          # offline: scripted model + in-memory toolset
 ```
 
 `pnpm demo` runs an in-memory toolset and a scripted model (no network, no API
-key), accumulates varied telemetry, and prints the derived `tools-metadata` view
-plus a decoding recommendation.
+key), accumulates varied telemetry, then prints the derived `tools-metadata`
+view, the learned decoding recommendation, and the decoding actually applied to
+the next run (`AgentRuntime.decodingProvider`).
 
 ## Running against real MCP servers and a real model
 
@@ -65,7 +67,9 @@ TelemetryRecorder → MemoryStore → Evaluator / GraphAnalyzer → ExtensionCon
 ```
 
 - **Model seam** (`ChatModel`): `AiSdkModel` (Vercel AI SDK, OpenAI-compatible) and
-  `ScriptedModel` (deterministic, for tests/demo).
+  `ScriptedModel` (deterministic, for tests/demo). Each model advertises the
+  decoding knobs it supports (`capabilities`); `AgentRuntime.decodingProvider(...)`
+  resolves learned profiles against them and applies them to each step.
 - **Transport seam** (`Toolset`): `StdioToolset` (official MCP SDK), `InMemoryToolset`,
   and `AggregateToolset` for multiple servers.
 - **Execution seam** (`AgentExecutor`): `AgentRuntime`, which wires
@@ -78,8 +82,9 @@ See [`docs/architecture.md`](./docs/architecture.md) and [`AGENTS.md`](./AGENTS.
 - stdio MCP only today; local by default. If HTTP transport is added, bind
   `127.0.0.1` and require auth.
 - Dependency overrides in `pnpm-workspace.yaml` pin patched transitive versions
-  pulled by the MCP SDK (see `../adaptive-mcp/README.md`). Run
-  `pnpm audit --prod` before releases.
+  pulled by the MCP SDK (see the
+  [Adaptive MCP README](https://github.com/kemalelmizan/adaptive-mcp#security)).
+  Run `pnpm audit --prod` before releases.
 
 ## License
 

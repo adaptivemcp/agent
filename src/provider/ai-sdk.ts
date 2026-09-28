@@ -1,6 +1,8 @@
 import { generateText, dynamicTool, jsonSchema, stepCountIs } from "ai";
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { OPENAI_CAPABILITIES } from "@adaptivemcp/routing";
+import type { ModelCapabilities } from "@adaptivemcp/spec";
 import type { ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
 
 export interface AiSdkProviderConfig {
@@ -10,6 +12,12 @@ export interface AiSdkProviderConfig {
   baseURL?: string;
   apiKey?: string;
   headers?: Record<string, string>;
+  /**
+   * Decoding knobs the endpoint supports. Defaults to `OPENAI_CAPABILITIES`.
+   * Override for an OpenAI-compatible backend that exposes more (e.g. a
+   * llama.cpp server with `topK`/`minP`).
+   */
+  capabilities?: ModelCapabilities;
 }
 
 /**
@@ -19,9 +27,15 @@ export interface AiSdkProviderConfig {
  */
 export class AiSdkModel implements ChatModel {
   readonly name: string;
+  readonly capabilities: ModelCapabilities;
 
-  constructor(private readonly model: LanguageModel, modelId: string) {
+  constructor(
+    private readonly model: LanguageModel,
+    modelId: string,
+    capabilities: ModelCapabilities = OPENAI_CAPABILITIES,
+  ) {
     this.name = modelId;
+    this.capabilities = capabilities;
   }
 
   async step(messages: ChatMessage[], tools: ToolSpec[], params: ChatParams = {}): Promise<ChatStep> {
@@ -42,6 +56,9 @@ export class AiSdkModel implements ChatModel {
       stopWhen: stepCountIs(1),
       temperature: params.temperature,
       topP: params.topP,
+      topK: params.topK,
+      presencePenalty: params.presencePenalty,
+      frequencyPenalty: params.frequencyPenalty,
       maxOutputTokens: params.maxOutputTokens,
     });
 
@@ -71,7 +88,7 @@ export function createAiSdkModel(config: AiSdkProviderConfig = {}): AiSdkModel {
     headers: config.headers,
   });
   const modelId = config.model ?? "gpt-4o-mini";
-  return new AiSdkModel(provider(modelId), modelId);
+  return new AiSdkModel(provider(modelId), modelId, config.capabilities);
 }
 
 function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {

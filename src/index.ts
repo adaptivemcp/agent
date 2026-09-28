@@ -31,6 +31,8 @@ export type {
   ChatParams,
   ChatStep,
   ChatUsage,
+  DecodingProvider,
+  DecodingRequest,
   ToolCall,
   ToolExecutionResult,
   ToolSpec,

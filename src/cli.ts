@@ -133,12 +133,17 @@ async function main(): Promise<void> {
       tools: specs,
       executor: runtime,
       maxSteps: args.maxSteps ?? 8,
+      // Apply learned decoding recommendations to each completion.
+      decoding: runtime.decodingProvider(model.capabilities),
       messages: [
         { role: "system", content: "You are an MCP-native agent. Use the available tools when helpful." },
         { role: "user", content: args.prompt ?? "List the tools you have, then stop." },
       ],
       onEvent: (event) => {
         if (event.type === "assistant_text") console.log(event.text);
+        if (event.type === "decoding_applied") {
+          console.log(`· decoding ${JSON.stringify(event.params)}`);
+        }
         if (event.type === "tool_call") {
           console.log(`→ ${event.call.name}(${JSON.stringify(event.call.input ?? {})})`);
         }

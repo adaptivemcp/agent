@@ -62,6 +62,8 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `evaluateWorkflows()` — cross-session/workflow learning;
 - `toolsMetadata(mime?)` — the derived `tools-metadata` view;
 - `suggestDecoding(tool, capabilities, { intent })` — advisory decoding profile.
+- `decodingProvider(capabilities, { tool, intent })` — a `DecodingProvider` for
+  `runAgent` that applies the strongest learned decoding profile to each step.
 
 ## Golden rules
 
@@ -91,7 +93,8 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 ## Current limitations / next
 
 - CLI is functional but minimal (single prompt, stdio servers, no TUI yet).
-- The decoding suggestion is exposed but not yet auto-applied per step.
+- Decoding recommendations are applied per step via `decodingProvider`; routing
+  recommendations are surfaced but not yet auto-applied.
 - Execution-graph nodes are rooted per top-level tool call within a session; a
   per-turn workflow DAG is future work.
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.

@@ -8,8 +8,8 @@ import {
   toDecodingRecommendation,
   type DecodingProfileId,
 } from "@adaptivemcp/routing";
-import type { DecodingRecommendation, ModelCapabilities } from "@adaptivemcp/spec";
-import type { AgentExecutor, ToolCall, ToolExecutionResult, ToolSpec } from "./types.js";
+import type { DecodingRecommendation, ModelCapabilities, ToolRecord } from "@adaptivemcp/spec";
+import type { AgentExecutor, ChatParams, DecodingProvider, ToolCall, ToolExecutionResult, ToolSpec } from "./types.js";
 import type { McpToolResult } from "./mcp/toolset.js";
 
 /** Performs the raw MCP tool call (transport lives behind this seam). */
@@ -140,7 +140,57 @@ export class AgentRuntime implements AgentExecutor {
     return toDecodingRecommendation(recommendation, this.resolver, capabilities);
   }
 
+  /**
+   * Build a `DecodingProvider` for `runAgent` that closes the adaptation loop:
+   * before each completion it selects a tool with a learned decoding signal and
+   * applies that tool's resolved profile to the next model step. Without
+   * `toolName`, it chooses the known tool with the highest observed failure
+   * rate — the one most in need of deterministic decoding.
+   *
+   * Advisory: the host decides to opt in by passing the provider to `runAgent`.
+   */
+  decodingProvider(
+    capabilities: ModelCapabilities,
+    options: { toolName?: string; serverName?: string; intent?: DecodingProfileId } = {},
+  ): DecodingProvider {
+    return () => {
+      const target = options.toolName
+        ? { toolName: options.toolName, serverName: options.serverName }
+        : this.mostSignificantTool();
+      if (!target) return undefined;
+      const recommendation = this.suggestDecoding(target.toolName, capabilities, {
+        serverName: target.serverName,
+        intent: options.intent,
+      });
+      return recommendation ? toChatParams(recommendation) : undefined;
+    };
+  }
+
+  /** The known tool with the highest observed failure rate (ties keep the first). */
+  private mostSignificantTool(): ToolRecord | undefined {
+    let best: ToolRecord | undefined;
+    for (const record of this.adaptive.memory.allTools()) {
+      if (record.stats.invocations === 0) continue;
+      if (!best || record.stats.failureRate > best.stats.failureRate) best = record;
+    }
+    return best;
+  }
+
   close(): void {
     this.adaptive.close();
   }
+}
+
+/** Map a resolved decoding recommendation onto the loop's `ChatParams`. */
+function toChatParams(recommendation: DecodingRecommendation): ChatParams | undefined {
+  const { resolved } = recommendation;
+  const params: ChatParams = {};
+  if (resolved.temperature !== undefined) params.temperature = resolved.temperature;
+  if (resolved.topP !== undefined) params.topP = resolved.topP;
+  if (resolved.topK !== undefined) params.topK = resolved.topK;
+  if (resolved.minP !== undefined) params.minP = resolved.minP;
+  if (resolved.presencePenalty !== undefined) params.presencePenalty = resolved.presencePenalty;
+  if (resolved.frequencyPenalty !== undefined) params.frequencyPenalty = resolved.frequencyPenalty;
+  if (resolved.repetitionPenalty !== undefined) params.repetitionPenalty = resolved.repetitionPenalty;
+  return Object.keys(params).length > 0 ? params : undefined;
 }

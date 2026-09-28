@@ -85,9 +85,18 @@ loses the gate, middleware, graph, and telemetry.
 `DecodingAdvisor` (profile selection from observed failure rate + caller intent)
 through `DecodingResolver` (table-driven, backend-specific knobs) and returns a
 `DecodingRecommendation` with `confidence` + `reasons`. It is advisory; the host
-decides whether/when to apply it. Because the agent owns its completion call, it
-*can* apply `resolved` params on the next model step — that wiring is the next
-step.
+decides whether/when to apply it.
+
+`AgentRuntime.decodingProvider(capabilities, { tool, intent })` turns that into a
+`DecodingProvider` the loop consumes: before each completion, `runAgent` asks the
+provider for `ChatParams` overrides, merges them over any static `params`, and
+passes the result to `model.step`. The provider picks the known tool with the
+highest observed failure rate (or a caller-named tool) and maps the
+recommendation's `resolved` knobs onto `ChatParams` — which is exactly the set
+the backend advertises through `ChatModel.capabilities` (`AiSdkModel` defaults to
+`OPENAI_CAPABILITIES`). Each applied step is reported as a `decoding_applied`
+event, so the adaptation is observable. This is what "the agent owns its LLM call"
+buys: a recommendation that a provider-hosted runner could not apply.
 
 ## Decisions (2026-09-28)
 
@@ -103,7 +112,8 @@ step.
 
 ## Roadmap
 
-1. Apply decoding recommendations to the next model step (close the loop).
+1. **Done:** apply decoding recommendations to the next model step
+   (`AgentRuntime.decodingProvider` + the loop's `DecodingProvider` seam).
 2. TUI (opencode-inspired) over the same library core.
 3. Per-turn workflow DAGs (parent/child across tool calls in one turn).
 4. More providers via the AI SDK; streaming.
