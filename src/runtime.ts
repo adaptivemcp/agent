@@ -103,6 +103,15 @@ export class AgentRuntime implements AgentExecutor {
     return { ok: recorded.ok, error: recorded.error, output: recorded.output, decision: outcome.decision };
   }
 
+  /**
+   * Run one model step's batch of tool calls under a single execution-graph
+   * root, so the turn's calls form one DAG rather than one disconnected root per
+   * call. `runAgent` calls this when present.
+   */
+  runTurn<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    return this.graphTracking.runTurn(label, fn);
+  }
+
   /** Run the heavier cross-tool passes (routing + orchestration). */
   runAdaptation(): void {
     this.adaptive.router.routeAll();

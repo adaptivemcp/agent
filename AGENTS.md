@@ -98,10 +98,10 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 
 ## Current limitations / next
 
-- Interactive REPL (`src/repl.ts`) + one-shot CLI, both streaming; a full-screen
-  TUI is next.
+- Interactive streaming REPL (`src/repl.ts`) + one-shot CLI, both streaming; a
+  full-screen TUI is next.
 - Decoding recommendations are applied per step via `decodingProvider`; routing
   recommendations are surfaced but not yet auto-applied.
-- Execution-graph nodes are rooted per top-level tool call within a session; a
-  per-turn workflow DAG is future work.
+- A step's tool calls share one `agent_turn_<n>` execution-graph root
+  (`AgentRuntime.runTurn`); deeper per-turn action nesting is future work.
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.

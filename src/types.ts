@@ -121,6 +121,12 @@ export interface ToolExecutionResult {
 /** The execution seam: routes one tool call through the Adaptive MCP loop. */
 export interface AgentExecutor {
   execute(call: ToolCall, spec: ToolSpec): Promise<ToolExecutionResult>;
+  /**
+   * Optional: run one model step's batch of tool calls inside a single
+   * execution-graph root, so a turn with several calls forms one DAG instead of
+   * one disconnected root per call. Implemented by `AgentRuntime`.
+   */
+  runTurn?<T>(label: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export interface AgentRunResult {

@@ -69,22 +69,31 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
 
     messages.push({ role: "assistant", content: chat.text ?? "", toolCalls: chat.toolCalls });
 
-    for (const call of chat.toolCalls) {
-      const spec = toolsByName.get(call.name);
-      emit({ type: "tool_call", call, spec: spec ?? { name: call.name, inputSchema: {} }, step });
+    // Execute the whole step's tool calls inside one graph root, so they form a
+    // single per-turn DAG rather than one disconnected root per call.
+    const runToolCalls = async (): Promise<void> => {
+      for (const call of chat.toolCalls) {
+        const spec = toolsByName.get(call.name);
+        emit({ type: "tool_call", call, spec: spec ?? { name: call.name, inputSchema: {} }, step });
 
-      const result = spec
-        ? await options.executor.execute(call, spec)
-        : { ok: false, error: `unknown tool: ${call.name}` };
-      emit({ type: "tool_result", call, result, step });
+        const result = spec
+          ? await options.executor.execute(call, spec)
+          : { ok: false, error: `unknown tool: ${call.name}` };
+        emit({ type: "tool_result", call, result, step });
 
-      messages.push({
-        role: "tool",
-        content: stringify(result.output ?? result.error ?? ""),
-        toolCallId: call.id,
-        name: call.name,
-        isError: !result.ok,
-      });
+        messages.push({
+          role: "tool",
+          content: stringify(result.output ?? result.error ?? ""),
+          toolCallId: call.id,
+          name: call.name,
+          isError: !result.ok,
+        });
+      }
+    };
+    if (options.executor.runTurn) {
+      await options.executor.runTurn(`agent_turn_${step}`, runToolCalls);
+    } else {
+      await runToolCalls();
     }
   }
 

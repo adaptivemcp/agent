@@ -329,4 +329,38 @@ describe("agent loop", () => {
     runtime.close();
     await tools.close();
   });
+
+  it("groups one turn's tool calls under a single execution-graph root", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s11");
+    const model = new ScriptedModel([
+      {
+        toolCalls: [
+          { name: "search_customer", input: { q: "acme" } },
+          { name: "deploy_service", input: { env: "prod" } },
+        ],
+      },
+      { text: "done" },
+    ]);
+
+    await runAgent({
+      model,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+    });
+
+    const roots = runtime.adaptive.memory.getRootNodes("s11");
+    expect(roots).toHaveLength(1);
+    const turn = roots[0]!;
+    expect(turn.toolName).toBe("agent_turn_0");
+    expect(turn.childrenIds).toHaveLength(2);
+    const children = turn.childrenIds.map((id) => runtime.adaptive.memory.getExecutionNode(id)!);
+    expect(children.map((child) => child.toolName).sort()).toEqual(["deploy_service", "search_customer"]);
+    for (const child of children) expect(child.parentId).toBe(turn.id);
+
+    runtime.close();
+    await tools.close();
+  });
 });

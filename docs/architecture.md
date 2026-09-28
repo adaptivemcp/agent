@@ -78,9 +78,9 @@ loses the gate, middleware, graph, and telemetry.
 - Each agent process gets one `GraphTrackingMiddleware` with a stable `sessionId`
   and optional `workflowId`.
 - `ThinClient` forks an async context per top-level call, so concurrent tool
-  calls don't corrupt each other's parent/child stacks. Today each top-level call
-  becomes its own graph root within the session; a single per-turn DAG is future
-  work.
+  calls don't corrupt each other's parent/child stacks. `AgentRuntime.runTurn`
+  groups one model step's tool calls under a single `agent_turn_<n>` root, so a
+  turn forms one DAG; without it each top-level call is its own root.
 - `AgentRuntime.evaluateWorkflows()` runs the cross-session/workflow learning pass.
 
 ## Decoding
@@ -120,7 +120,8 @@ buys: a recommendation that a provider-hosted runner could not apply.
    (`AgentRuntime.decodingProvider` + the loop's `DecodingProvider` seam).
 2. Interactive REPL **done** (`src/repl.ts`, streaming, multi-turn); a
    full-screen TUI (opencode-inspired) over the same library core is next.
-3. Per-turn workflow DAGs (parent/child across tool calls in one turn).
+3. **Done:** per-turn workflow DAGs — `AgentRuntime.runTurn` groups a step's tool
+   calls under one `agent_turn_<n>` root.
 4. **Partly done:** token streaming in `AiSdkModel.stream`; more providers via the
    AI SDK next.
 5. Publish the library as a consumable package.
