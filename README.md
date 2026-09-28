@@ -55,7 +55,8 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
-`/metadata`, `/decoding <tool>`, `/reset`, `/exit`.
+`/graph` (the per-turn execution DAG), `/metadata`, `/decoding <tool>`,
+`/reset`, `/exit`.
 
 ### Against your own endpoint and servers
 

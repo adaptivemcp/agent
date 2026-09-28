@@ -128,6 +128,28 @@ export class AgentRuntime implements AgentExecutor {
     return this.graphTracking.getSessionId();
   }
 
+  /**
+   * A compact text tree of this session's execution graph: each turn root
+   * (`agent_turn_<n>`) with its tool calls indented beneath it. Powers the
+   * REPL's `/graph` command.
+   */
+  graphView(): string {
+    const memory = this.adaptive.memory;
+    const roots = memory.getRootNodes?.(this.sessionId()) ?? [];
+    if (roots.length === 0) return "(no graph yet)";
+    const lines: string[] = [];
+    const render = (id: string, depth: number): void => {
+      const node = memory.getExecutionNode?.(id);
+      if (!node) return;
+      const mark = node.status === "completed" ? "✓" : node.status === "failed" ? "✗" : "…";
+      const duration = node.durationMs !== undefined ? ` ${node.durationMs}ms` : "";
+      lines.push(`${"  ".repeat(depth)}${mark} ${node.toolName}${duration}`);
+      for (const childId of node.childrenIds) render(childId, depth + 1);
+    };
+    for (const root of roots) render(root.id, 0);
+    return lines.join("\n");
+  }
+
   /** The derived `tools-metadata` view (YAML by default). */
   toolsMetadata(mimeType?: string): string {
     return this.adaptive.extension.resourceText(mimeType);

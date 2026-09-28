@@ -21,6 +21,8 @@ export interface ReplOptions {
   metadata?: () => string;
   /** Text for `/decoding <tool>` (a decoding recommendation, if any). */
   decodingFor?: (toolName: string) => string | undefined;
+  /** Text for `/graph` (the session's execution-graph tree). */
+  graph?: () => string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
 }
@@ -51,7 +53,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /metadata, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /graph, /metadata, /decoding <tool>, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -114,6 +116,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             output.write(
               "commands:\n" +
                 "  /tools              list discovered tools\n" +
+                "  /graph              show this session's execution-graph DAG\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /reset              clear the conversation\n" +
@@ -125,6 +128,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
               output.write(`  ${tool.name}${tool.serverName ? color.dim(` [${tool.serverName}]`) : ""}\n`);
               if (tool.description) output.write(color.dim(`    ${preview(tool.description, 160)}\n`));
             }
+            continue;
+          case "/graph":
+            output.write(options.graph ? `${options.graph()}\n` : color.dim("(no graph view)\n"));
             continue;
           case "/metadata":
             output.write(options.metadata ? `${options.metadata()}\n` : color.dim("(no metadata view)\n"));

@@ -360,6 +360,11 @@ describe("agent loop", () => {
     expect(children.map((child) => child.toolName).sort()).toEqual(["deploy_service", "search_customer"]);
     for (const child of children) expect(child.parentId).toBe(turn.id);
 
+    const view = runtime.graphView();
+    expect(view).toContain("agent_turn_0");
+    expect(view).toContain("search_customer");
+    expect(view).toContain("deploy_service");
+
     runtime.close();
     await tools.close();
   });

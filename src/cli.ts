@@ -181,6 +181,7 @@ async function main(): Promise<void> {
         maxSteps,
         stream,
         metadata: () => runtime.toolsMetadata(),
+        graph: () => runtime.graphView(),
         decodingFor: (tool) => {
           const recommendation = runtime.suggestDecoding(tool, model.capabilities, {
             serverName: serverByTool.get(tool),
@@ -207,7 +208,10 @@ async function main(): Promise<void> {
     });
 
     console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}`);
-    if (args.verbose) console.log(`\n[tools-metadata]\n${runtime.toolsMetadata()}`);
+    if (args.verbose) {
+      console.log(`\n[execution-graph]\n${runtime.graphView()}`);
+      console.log(`\n[tools-metadata]\n${runtime.toolsMetadata()}`);
+    }
     runtime.close();
   } finally {
     await tools.close();
