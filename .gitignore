@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# Local runtime state
+*.sqlite
+*.sqlite-*
+tools-metadata.yaml
+.env
+.env.*

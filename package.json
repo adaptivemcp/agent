@@ -1,0 +1,63 @@
+{
+  "name": "@adaptivemcp/agent",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The Adaptive MCP agent: an MCP-native agent host that closes the adaptation loop by owning both the LLM completion and the MCP execution.",
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "adaptivemcp-agent": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "dev": "tsx src/cli.ts",
+    "demo": "tsx examples/vertical-slice.ts"
+  },
+  "dependencies": {
+    "@adaptivemcp/approval": "link:../adaptive-mcp/packages/approval",
+    "@adaptivemcp/evaluation": "link:../adaptive-mcp/packages/evaluation",
+    "@adaptivemcp/extension": "link:../adaptive-mcp/packages/extension",
+    "@adaptivemcp/graph-analysis": "link:../adaptive-mcp/packages/graph-analysis",
+    "@adaptivemcp/memory": "link:../adaptive-mcp/packages/memory",
+    "@adaptivemcp/middleware": "link:../adaptive-mcp/packages/middleware",
+    "@adaptivemcp/orchestration": "link:../adaptive-mcp/packages/orchestration",
+    "@adaptivemcp/routing": "link:../adaptive-mcp/packages/routing",
+    "@adaptivemcp/runtime": "link:../adaptive-mcp/packages/runtime",
+    "@adaptivemcp/spec": "link:../adaptive-mcp/packages/spec",
+    "@adaptivemcp/telemetry": "link:../adaptive-mcp/packages/telemetry",
+    "@adaptivemcp/thin-client": "link:../adaptive-mcp/packages/thin-client",
+    "@ai-sdk/openai": "^4.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.13.0",
+    "prettier": "^3.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.12.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,17 @@
+packages:
+  - "."
+
+# pnpm 11 reads build-script approval + overrides from this file (NOT from
+# `pnpm.onlyBuiltDependencies` / `pnpm.overrides` in package.json).
+allowBuilds:
+  esbuild: true
+
+# Security parity with the adaptive-mcp repo: force patched transitive versions
+# pulled by the MCP SDK's HTTP transports. See ../adaptive-mcp/README.md.
+overrides:
+  hono: 4.13.9
+  qs: 6.16.0
+  fast-uri: 3.1.8
+  ip-address: 10.7.2
+  "@hono/node-server": 1.19.17
+  "js-yaml@<4": 3.15.2
