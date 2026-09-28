@@ -8,6 +8,7 @@
  */
 
 export { runAgent, type RunAgentOptions } from "./agent/loop.js";
+export { runRepl, type ReplOptions } from "./repl.js";
 export { AgentRuntime, type AgentRuntimeOptions, type ToolInvoker } from "./runtime.js";
 export {
   AggregateToolset,
@@ -18,9 +19,16 @@ export {
   type Toolset,
 } from "./mcp/toolset.js";
 export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
-export { AiSdkModel, createAiSdkModel, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
+export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
-export { parseServer, parseServers, providerConfigFromEnv, type AgentConfig } from "./config.js";
+export {
+  parseServer,
+  parseServers,
+  providerConfigFromEnv,
+  exampleServerOptions,
+  LOCAL_PROVIDER_DEFAULTS,
+  type AgentConfig,
+} from "./config.js";
 export type {
   AgentEvent,
   AgentEventListener,

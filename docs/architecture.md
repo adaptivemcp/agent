@@ -16,13 +16,13 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│ CLI / (future TUI)                                                │
-│   parses args, builds toolsets + model, calls runAgent            │
+│ CLI + REPL (future full-screen TUI)                               │
+│   parses args, builds toolsets + model, drives runAgent           │
 ├──────────────────────────────────────────────────────────────────┤
 │ runAgent loop (src/agent/loop.ts)                                 │
-│   model.step → tool calls → executor.execute → feed results back   │
+│   model.step/stream → tool calls → executor.execute → results      │
 ├───────────────────────────────┬──────────────────────────────────┤
-│ ChatModel seam                │ AgentExecutor seam                │
+│ ChatModel seam (step/stream)  │ AgentExecutor seam                │
 │  AiSdkModel (Vercel AI SDK)   │  AgentRuntime                     │
 │  ScriptedModel (tests/demo)   │    AdaptiveRuntime + ThinClient   │
 │                               │    + GraphTrackingMiddleware      │
@@ -34,6 +34,10 @@
 │                               │  graph-analysis                   │
 └───────────────────────────────┴──────────────────────────────────┘
 ```
+
+`AiSdkModel` also implements `ChatModel.stream`, so the CLI/REPL render tokens as
+they arrive (as `text_delta` events). `step` is the non-streaming path; both
+return the same `ChatStep`, so tool handling is identical either way.
 
 ## Data flow of one tool call
 
@@ -114,7 +118,9 @@ buys: a recommendation that a provider-hosted runner could not apply.
 
 1. **Done:** apply decoding recommendations to the next model step
    (`AgentRuntime.decodingProvider` + the loop's `DecodingProvider` seam).
-2. TUI (opencode-inspired) over the same library core.
+2. Interactive REPL **done** (`src/repl.ts`, streaming, multi-turn); a
+   full-screen TUI (opencode-inspired) over the same library core is next.
 3. Per-turn workflow DAGs (parent/child across tool calls in one turn).
-4. More providers via the AI SDK; streaming.
+4. **Partly done:** token streaming in `AiSdkModel.stream`; more providers via the
+   AI SDK next.
 5. Publish the library as a consumable package.

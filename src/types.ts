@@ -77,6 +77,18 @@ export interface ChatModel {
    */
   readonly capabilities?: ModelCapabilities;
   step(messages: ChatMessage[], tools: ToolSpec[], params?: ChatParams): Promise<ChatStep>;
+  /**
+   * Optional token streaming. When present, `runAgent` uses it (unless
+   * `stream: false`) and reports each chunk as a `text_delta` event. It must
+   * resolve to the same `ChatStep` `step()` would have returned, so the loop's
+   * tool handling is identical either way.
+   */
+  stream?(
+    messages: ChatMessage[],
+    tools: ToolSpec[],
+    params: ChatParams,
+    onTextDelta: (text: string) => void,
+  ): Promise<ChatStep>;
 }
 
 /**
@@ -118,6 +130,7 @@ export interface AgentRunResult {
 }
 
 export type AgentEvent =
+  | { type: "text_delta"; text: string; step: number }
   | { type: "assistant_text"; text: string; step: number }
   | { type: "decoding_applied"; params: ChatParams; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }

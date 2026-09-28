@@ -32,8 +32,14 @@ pnpm test          # vitest (offline; scripted model + in-memory toolset)
 pnpm lint          # eslint
 pnpm format        # prettier --write
 pnpm demo          # offline vertical slice: loop -> telemetry -> derived view
+pnpm dev           # interactive REPL (streaming, multi-turn)
+pnpm dev -- --prompt "..." --server "fs=npx ..."   # one-shot
 pnpm dev -- --help # CLI (tsx)
 ```
+
+By default `pnpm dev` targets a local `llama-server`
+(`${AI_BASE_URL:-http://127.0.0.1:8079/v1}`, key `$AI_API_KEY`/`$LLAMA_API_KEY`)
+and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override both.
 
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
@@ -44,7 +50,7 @@ The agent is three seams plus a loop (`src/`):
 
 | Seam | Interface | Implementations |
 | --- | --- | --- |
-| Model | `ChatModel` (`src/types.ts`) | `AiSdkModel` (Vercel AI SDK, OpenAI-compatible), `ScriptedModel` (tests/demo) |
+| Model | `ChatModel` (`src/types.ts`) | `AiSdkModel` (Vercel AI SDK, OpenAI-compatible; `step` + token streaming), `ScriptedModel` (tests/demo) |
 | Transport | `Toolset` (`src/mcp/toolset.ts`) | `StdioToolset` (official MCP SDK, stdio), `InMemoryToolset` (tests/demo), `AggregateToolset` (namespaced multi-server) |
 | Execution | `AgentExecutor` (`src/types.ts`) | `AgentRuntime` (`src/runtime.ts`) |
 
@@ -92,7 +98,8 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 
 ## Current limitations / next
 
-- CLI is functional but minimal (single prompt, stdio servers, no TUI yet).
+- Interactive REPL (`src/repl.ts`) + one-shot CLI, both streaming; a full-screen
+  TUI is next.
 - Decoding recommendations are applied per step via `decodingProvider`; routing
   recommendations are surfaced but not yet auto-applied.
 - Execution-graph nodes are rooted per top-level tool call within a session; a

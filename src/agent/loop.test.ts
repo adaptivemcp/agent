@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
 import { InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
-import { ScriptedModel } from "../provider/scripted.js";
+import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
 import { runAgent } from "./loop.js";
-import type { AgentEvent, ChatMessage, ChatModel, ChatParams, ChatStep, ToolSpec } from "../types.js";
+import type { AgentEvent, ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
 
 /** Wraps a model to capture the params the loop passes to each completion. */
 class RecordingModel implements ChatModel {
@@ -16,6 +16,44 @@ class RecordingModel implements ChatModel {
   step(messages: ChatMessage[], tools: ToolSpec[], params?: ChatParams): Promise<ChatStep> {
     this.params.push(params);
     return this.inner.step(messages, tools, params);
+  }
+}
+
+/** A scripted model that also implements `stream` by emitting char-by-char. */
+class StreamingScriptedModel implements ChatModel {
+  readonly name = "streaming-scripted";
+  private cursor = 0;
+
+  constructor(private readonly turns: ScriptedTurn[]) {}
+
+  private next(): ChatStep {
+    const turn = this.turns[Math.min(this.cursor, this.turns.length - 1)] ?? {};
+    this.cursor += 1;
+    const toolCalls: ToolCall[] = (turn.toolCalls ?? []).map((call, index) => ({
+      id: `call-${this.cursor}-${index}`,
+      name: call.name,
+      input: call.input ?? {},
+    }));
+    return {
+      text: turn.text,
+      toolCalls,
+      finishReason: toolCalls.length > 0 ? "tool-calls" : "stop",
+    };
+  }
+
+  async step(): Promise<ChatStep> {
+    return this.next();
+  }
+
+  async stream(
+    _messages: ChatMessage[],
+    _tools: ToolSpec[],
+    _params: ChatParams,
+    onTextDelta: (text: string) => void,
+  ): Promise<ChatStep> {
+    const chat = this.next();
+    if (chat.text) for (const char of Array.from(chat.text)) onTextDelta(char);
+    return chat;
   }
 }
 
@@ -209,6 +247,84 @@ describe("agent loop", () => {
 
     const provider = runtime.decodingProvider(LLAMA_CPP_CAPABILITIES);
     expect(await provider({ step: 0, messages: [], tools: [] })).toBeUndefined();
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("streams assistant text as text_delta events", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s8");
+    const events: AgentEvent[] = [];
+    const model = new StreamingScriptedModel([{ text: "hello" }]);
+
+    const result = await runAgent({
+      model,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "hi" }],
+      onEvent: (event) => events.push(event),
+    });
+
+    const deltas = events
+      .filter((event): event is Extract<AgentEvent, { type: "text_delta" }> => event.type === "text_delta")
+      .map((event) => event.text)
+      .join("");
+    expect(deltas).toBe("hello");
+    // Streamed text must not be re-emitted whole.
+    expect(events.some((event) => event.type === "assistant_text")).toBe(false);
+    expect(result.messages.at(-1)?.content).toBe("hello");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("executes tool calls discovered while streaming", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s9");
+    const events: AgentEvent[] = [];
+    const model = new StreamingScriptedModel([
+      { toolCalls: [{ name: "search_customer", input: { q: "acme" } }] },
+      { text: "done" },
+    ]);
+
+    await runAgent({
+      model,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "tool_result" && event.result.ok)).toBe(true);
+    expect(runtime.adaptive.memory.getTool("search_customer", "demo")?.stats.invocations).toBe(1);
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("falls back to step() when streaming is disabled", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s10");
+    const events: AgentEvent[] = [];
+    const model = new StreamingScriptedModel([{ text: "whole" }]);
+
+    await runAgent({
+      model,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "hi" }],
+      stream: false,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "text_delta")).toBe(false);
+    expect(
+      events.some((event) => event.type === "assistant_text" && event.text === "whole"),
+    ).toBe(true);
 
     runtime.close();
     await tools.close();

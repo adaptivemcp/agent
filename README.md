@@ -34,21 +34,47 @@ key), accumulates varied telemetry, then prints the derived `tools-metadata`
 view, the learned decoding recommendation, and the decoding actually applied to
 the next run (`AgentRuntime.decodingProvider`).
 
-## Running against real MCP servers and a real model
+## Running it (interactive)
+
+With the sibling `adaptive-mcp` example server built and a local
+OpenAI-compatible model running, no flags are needed — `pnpm dev` starts an
+interactive, streaming REPL:
+
+```bash
+pnpm dev
+```
+
+Defaults (each overridable by a flag or an `AI_*` env var):
+
+| Setting | Default |
+| --- | --- |
+| Model endpoint | `http://127.0.0.1:8079/v1` (a local `llama-server`) |
+| API key | `$AI_API_KEY`, else `$LLAMA_API_KEY` |
+| Model id | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field) |
+| MCP server | the sibling `adaptive-mcp` example server (`examples/dist/server.js`) |
+
+In the REPL, type a message and press Enter. Assistant text streams as it is
+generated; tool calls and results print underneath. Commands: `/tools`,
+`/metadata`, `/decoding <tool>`, `/reset`, `/exit`.
+
+### Against your own endpoint and servers
 
 ```bash
 AI_API_KEY=... AI_BASE_URL=https://api.openai.com/v1 AI_MODEL=gpt-4o-mini \
 pnpm dev -- \
-  --server "files=npx -y @modelcontextprotocol/server-filesystem /tmp" \
-  --prompt "List the files in /tmp"
+  --server "files=npx -y @modelcontextprotocol/server-filesystem /tmp"
 ```
 
-- `--server "name=command args"` is repeatable; tools are namespaced
-  `<server>_<tool>` when more than one server is present.
+- `--server "name=command args"` is repeatable; tool names are always namespaced
+  `<server>_<tool>`.
+- `--prompt "..."` runs a single turn and exits instead of starting the REPL.
+- `--no-stream` disables token streaming; `-v/--verbose` prints applied decoding
+  and the derived view after a one-shot run.
 - `AI_BASE_URL` accepts any OpenAI-compatible endpoint (OpenAI, Ollama, llama.cpp,
   vLLM, ...).
 - `--list-tools` prints discovered tools and exits; `--db`/`--yaml` persist the
-  store and the derived view.
+  store and the derived view of the agent's own store (the MCP server keeps its
+  own).
 
 ## Architecture
 
@@ -66,10 +92,11 @@ TelemetryRecorder → MemoryStore → Evaluator / GraphAnalyzer → ExtensionCon
                                    → tools-metadata view (YAML/JSON)
 ```
 
-- **Model seam** (`ChatModel`): `AiSdkModel` (Vercel AI SDK, OpenAI-compatible) and
-  `ScriptedModel` (deterministic, for tests/demo). Each model advertises the
-  decoding knobs it supports (`capabilities`); `AgentRuntime.decodingProvider(...)`
-  resolves learned profiles against them and applies them to each step.
+- **Model seam** (`ChatModel`): `AiSdkModel` (Vercel AI SDK, OpenAI-compatible,
+  `step` + `stream`) and `ScriptedModel` (deterministic, for tests/demo). Each
+  model advertises the decoding knobs it supports (`capabilities`);
+  `AgentRuntime.decodingProvider(...)` resolves learned profiles against them and
+  applies them to each step. `stream()` powers the REPL's token streaming.
 - **Transport seam** (`Toolset`): `StdioToolset` (official MCP SDK), `InMemoryToolset`,
   and `AggregateToolset` for multiple servers.
 - **Execution seam** (`AgentExecutor`): `AgentRuntime`, which wires

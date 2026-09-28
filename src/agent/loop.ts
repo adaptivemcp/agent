@@ -24,6 +24,11 @@ export interface RunAgentOptions {
    * and reported as a `decoding_applied` event.
    */
   decoding?: DecodingProvider;
+  /**
+   * Stream tokens when the model supports it (default: `true` when
+   * `model.stream` exists). Streamed chunks arrive as `text_delta` events.
+   */
+  stream?: boolean;
   onEvent?: AgentEventListener;
 }
 
@@ -37,6 +42,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
   const toolsByName = new Map(options.tools.map((spec) => [spec.name, spec]));
   const maxSteps = options.maxSteps ?? 8;
   const emit = (event: AgentEvent): void => options.onEvent?.(event);
+  const streamStep = options.stream === false ? undefined : options.model.stream;
 
   for (let step = 0; step < maxSteps; step += 1) {
     const decoded = options.decoding
@@ -45,8 +51,16 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
     const params = decoded ? { ...options.params, ...decoded } : options.params;
     if (decoded) emit({ type: "decoding_applied", params: params ?? {}, step });
 
-    const chat = await options.model.step(messages, options.tools, params);
-    if (chat.text) emit({ type: "assistant_text", text: chat.text, step });
+    let streamed = false;
+    const chat = streamStep
+      ? await streamStep.call(options.model, messages, options.tools, params ?? {}, (text) => {
+          streamed = true;
+          emit({ type: "text_delta", text, step });
+        })
+      : await options.model.step(messages, options.tools, params);
+    // With streaming the text already reached the listener as `text_delta`
+    // events, so only emit the whole-message event on the non-streaming path.
+    if (chat.text && !streamed) emit({ type: "assistant_text", text: chat.text, step });
 
     if (chat.toolCalls.length === 0) {
       if (chat.text) messages.push({ role: "assistant", content: chat.text });

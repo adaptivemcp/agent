@@ -1,9 +1,24 @@
-import { generateText, dynamicTool, jsonSchema, stepCountIs } from "ai";
+import { generateText, streamText, dynamicTool, jsonSchema, stepCountIs } from "ai";
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
-import { OPENAI_CAPABILITIES } from "@adaptivemcp/routing";
 import type { ModelCapabilities } from "@adaptivemcp/spec";
 import type { ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
+
+/**
+ * The knobs this adapter can actually forward to `generateText`/`streamText`.
+ * `DecodingResolver` targets this set, so a recommended profile only ever
+ * contains parameters the adapter can transmit (e.g. `minP`/`repetitionPenalty`
+ * are not AI SDK call settings and are therefore not advertised).
+ */
+export const AI_SDK_CAPABILITIES: ModelCapabilities = {
+  supports: {
+    temperature: true,
+    topP: true,
+    topK: true,
+    presencePenalty: true,
+    frequencyPenalty: true,
+  },
+};
 
 export interface AiSdkProviderConfig {
   /** Model id, e.g. `gpt-4o-mini`, or a local model served over an OpenAI-compatible API. */
@@ -13,9 +28,9 @@ export interface AiSdkProviderConfig {
   apiKey?: string;
   headers?: Record<string, string>;
   /**
-   * Decoding knobs the endpoint supports. Defaults to `OPENAI_CAPABILITIES`.
-   * Override for an OpenAI-compatible backend that exposes more (e.g. a
-   * llama.cpp server with `topK`/`minP`).
+   * Decoding knobs this adapter should advertise. Defaults to
+   * `AI_SDK_CAPABILITIES`; override to narrow it (e.g. an endpoint that rejects
+   * `topK`).
    */
   capabilities?: ModelCapabilities;
 }
@@ -32,51 +47,55 @@ export class AiSdkModel implements ChatModel {
   constructor(
     private readonly model: LanguageModel,
     modelId: string,
-    capabilities: ModelCapabilities = OPENAI_CAPABILITIES,
+    capabilities: ModelCapabilities = AI_SDK_CAPABILITIES,
   ) {
     this.name = modelId;
     this.capabilities = capabilities;
   }
 
   async step(messages: ChatMessage[], tools: ToolSpec[], params: ChatParams = {}): Promise<ChatStep> {
-    const aiTools: ToolSet = {};
-    for (const spec of tools) {
-      aiTools[spec.name] = dynamicTool({
-        description: spec.description ?? spec.name,
-        inputSchema: jsonSchema(spec.inputSchema as Parameters<typeof jsonSchema>[0]),
-      });
-    }
-
+    const prompt = toAiSdkPrompt(messages);
     const result = await generateText({
       model: this.model,
-      messages: toAiSdkMessages(messages),
-      tools: aiTools,
+      instructions: prompt.instructions,
+      messages: prompt.messages,
+      tools: buildAiTools(tools),
       // One step at a time: the agent loop owns tool execution (via the Adaptive
       // MCP executor), not the SDK.
       stopWhen: stepCountIs(1),
-      temperature: params.temperature,
-      topP: params.topP,
-      topK: params.topK,
-      presencePenalty: params.presencePenalty,
-      frequencyPenalty: params.frequencyPenalty,
-      maxOutputTokens: params.maxOutputTokens,
+      ...knobSettings(params),
     });
 
-    const toolCalls: ToolCall[] = result.toolCalls.map((call) => ({
-      id: call.toolCallId,
-      name: call.toolName,
-      input: call.input,
-    }));
+    return toChatStep(result.text, result.toolCalls, result.finishReason, result.usage);
+  }
 
-    return {
-      text: result.text || undefined,
-      toolCalls,
-      finishReason: result.finishReason,
-      usage: {
-        inputTokens: result.usage?.inputTokens,
-        outputTokens: result.usage?.outputTokens,
-      },
-    };
+  async stream(
+    messages: ChatMessage[],
+    tools: ToolSpec[],
+    params: ChatParams = {},
+    onTextDelta: (text: string) => void,
+  ): Promise<ChatStep> {
+    const prompt = toAiSdkPrompt(messages);
+    const result = streamText({
+      model: this.model,
+      instructions: prompt.instructions,
+      messages: prompt.messages,
+      tools: buildAiTools(tools),
+      stopWhen: stepCountIs(1),
+      ...knobSettings(params),
+    });
+
+    for await (const part of result.fullStream) {
+      if (part.type === "text-delta") onTextDelta(part.text);
+    }
+
+    const [text, toolCalls, finishReason, usage] = await Promise.all([
+      result.text,
+      result.toolCalls,
+      result.finishReason,
+      result.usage,
+    ]);
+    return toChatStep(text, toolCalls, finishReason, usage);
   }
 }
 
@@ -88,14 +107,78 @@ export function createAiSdkModel(config: AiSdkProviderConfig = {}): AiSdkModel {
     headers: config.headers,
   });
   const modelId = config.model ?? "gpt-4o-mini";
-  return new AiSdkModel(provider(modelId), modelId, config.capabilities);
+  // Use the Chat Completions model, not the provider's default Responses API:
+  // OpenAI-compatible local servers (llama.cpp, Ollama, vLLM) implement the
+  // former.
+  return new AiSdkModel(provider.chat(modelId), modelId, config.capabilities);
 }
 
-function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
+/** Translate decoding `ChatParams` into AI SDK call settings. */
+function knobSettings(params: ChatParams): {
+  temperature: number | undefined;
+  topP: number | undefined;
+  topK: number | undefined;
+  presencePenalty: number | undefined;
+  frequencyPenalty: number | undefined;
+  maxOutputTokens: number | undefined;
+} {
+  return {
+    temperature: params.temperature,
+    topP: params.topP,
+    topK: params.topK,
+    presencePenalty: params.presencePenalty,
+    frequencyPenalty: params.frequencyPenalty,
+    maxOutputTokens: params.maxOutputTokens,
+  };
+}
+
+function buildAiTools(tools: ToolSpec[]): ToolSet {
+  const aiTools: ToolSet = {};
+  for (const spec of tools) {
+    aiTools[spec.name] = dynamicTool({
+      description: spec.description ?? spec.name,
+      inputSchema: jsonSchema(spec.inputSchema as Parameters<typeof jsonSchema>[0]),
+    });
+  }
+  return aiTools;
+}
+
+interface AiSdkToolCall {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+}
+
+function toChatStep(
+  text: string,
+  toolCalls: ReadonlyArray<AiSdkToolCall>,
+  finishReason: string,
+  usage: { inputTokens?: number; outputTokens?: number } | undefined,
+): ChatStep {
+  const calls: ToolCall[] = toolCalls.map((call) => ({
+    id: call.toolCallId,
+    name: call.toolName,
+    input: call.input,
+  }));
+  return {
+    text: text || undefined,
+    toolCalls: calls,
+    finishReason,
+    usage: { inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens },
+  };
+}
+
+/**
+ * AI SDK v7 models system content through the `instructions` option rather than
+ * a `system` message. Pull every system message out of the conversation and
+ * join them; the rest become the `messages` array.
+ */
+function toAiSdkPrompt(messages: ChatMessage[]): { instructions?: string; messages: ModelMessage[] } {
+  const system: string[] = [];
   const out: ModelMessage[] = [];
   for (const message of messages) {
     if (message.role === "system") {
-      out.push({ role: "system", content: message.content });
+      system.push(message.content);
       continue;
     }
     if (message.role === "user") {
@@ -127,5 +210,5 @@ function toAiSdkMessages(messages: ChatMessage[]): ModelMessage[] {
       ],
     });
   }
-  return out;
+  return { instructions: system.length > 0 ? system.join("\n\n") : undefined, messages: out };
 }
