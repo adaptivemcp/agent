@@ -1,4 +1,5 @@
 import type { ModelCapabilities } from "@adaptivemcp/spec";
+import type { ModelPricing } from "../types.js";
 
 /** The provider families the agent can talk to. */
 export type ModelProviderKind = "openai-compatible" | "anthropic" | "google";
@@ -27,6 +28,8 @@ export interface ModelIntegration {
   latencyWeight?: number;
   /** Decoding knobs the backend exposes; defaults per provider. */
   capabilities?: ModelCapabilities;
+  /** USD per 1M tokens; enables real cost accounting for this model. */
+  pricing?: ModelPricing;
   /** Marks the fallback when routing has no learned opinion. */
   default?: boolean;
 }

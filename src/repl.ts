@@ -10,15 +10,27 @@ import type {
   ToolSpec,
 } from "./types.js";
 
+/** The runtime hooks the REPL uses for human-in-the-loop approvals. */
+export interface ApprovalHost {
+  setRequestApproval(requestApproval: (toolName: string) => boolean | Promise<boolean>): void;
+  approvalReason?(toolName: string): string | undefined;
+}
+
 export interface ReplOptions {
   model: ChatModel;
   tools: ToolSpec[];
-  executor: AgentExecutor;
+  executor: AgentExecutor & Partial<ApprovalHost>;
   decoding?: DecodingProvider;
   selectModel?: ModelSelector;
   system?: string;
   maxSteps?: number;
   stream?: boolean;
+  /** Prompt y/n when the gate returns require_confirmation (default true). */
+  approvals?: boolean;
+  /** Learned context injected into the system message each turn. */
+  context?: () => string;
+  /** Text for `/cost`. */
+  cost?: () => string;
   /** Text for `/metadata` (e.g. the derived tools-metadata view). */
   metadata?: () => string;
   /** Text for `/decoding <tool>` (a decoding recommendation, if any). */
@@ -44,8 +56,8 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const color = makeColor(output);
-  const system = options.system ?? DEFAULT_SYSTEM;
-  let messages: ChatMessage[] = [{ role: "system", content: system }];
+  const baseSystem = options.system ?? DEFAULT_SYSTEM;
+  let messages: ChatMessage[] = [{ role: "system", content: baseSystem }];
 
   const rl = createInterface({
     input,
@@ -57,7 +69,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /decoding <tool>, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -84,6 +96,12 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           output.write(color.dim(`[${event.model}] `));
         }
         break;
+      case "usage":
+        if (event.cost !== undefined) {
+          ensureNewline();
+          output.write(color.dim(`  · $${event.cost.toFixed(6)} (${event.model})\n`));
+        }
+        break;
       case "tool_call":
         ensureNewline();
         output.write(
@@ -104,6 +122,18 @@ export async function runRepl(options: ReplOptions): Promise<void> {
         break;
     }
   };
+
+  // Human-in-the-loop approvals: prompt for require_confirmation decisions.
+  if (options.approvals !== false && options.executor.setRequestApproval) {
+    options.executor.setRequestApproval(async (toolName) => {
+      ensureNewline();
+      const reason = options.executor.approvalReason?.(toolName);
+      const answer = await rl.question(
+        `${color.bold(`approve ${toolName}?`)}${reason ? color.dim(` — ${reason}`) : ""} ${color.dim("(y/N)")} `,
+      );
+      return /^y(es)?$/i.test(answer.trim());
+    });
+  }
 
   try {
     for (;;) {
@@ -130,6 +160,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /models             list model integrations (Adaptive MCP picks per tool)\n" +
                 "  /graph              show this session's execution-graph DAG\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
+                "  /cost               show recorded cost per tool\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /reset              clear the conversation\n" +
                 "  /exit               quit\n",
@@ -150,6 +181,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           case "/metadata":
             output.write(options.metadata ? `${options.metadata()}\n` : color.dim("(no metadata view)\n"));
             continue;
+          case "/cost":
+            output.write(options.cost ? `${options.cost()}\n` : color.dim("(no cost data)\n"));
+            continue;
           case "/decoding":
             if (!arg) {
               output.write(color.dim("usage: /decoding <tool>\n"));
@@ -159,13 +193,21 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             }
             continue;
           case "/reset":
-            messages = [{ role: "system", content: system }];
+            messages = [{ role: "system", content: baseSystem }];
             output.write(color.dim("(conversation reset)\n"));
             continue;
           default:
             output.write(color.dim(`unknown command: ${command} (try /help)\n`));
             continue;
         }
+      }
+
+      if (options.context) {
+        const learned = options.context();
+        messages[0] = {
+          role: "system",
+          content: learned ? `${baseSystem}\n\n${learned}` : baseSystem,
+        };
       }
 
       const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];

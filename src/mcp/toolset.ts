@@ -22,6 +22,7 @@ export interface InMemoryTool {
   name: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
   handler: (input: unknown) => unknown | Promise<unknown>;
 }
 
@@ -38,6 +39,7 @@ export class InMemoryToolset implements Toolset {
       description: tool.description,
       inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
       serverName: this.serverName,
+      annotations: tool.annotations,
     }));
   }
 

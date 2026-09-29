@@ -8,7 +8,7 @@
  */
 
 export { runAgent, type RunAgentOptions } from "./agent/loop.js";
-export { runRepl, type ReplOptions } from "./repl.js";
+export { runRepl, type ReplOptions, type ApprovalHost } from "./repl.js";
 export { AgentRuntime, type AgentRuntimeOptions, type ToolInvoker } from "./runtime.js";
 export {
   AggregateToolset,
@@ -49,6 +49,8 @@ export type {
   ChatUsage,
   DecodingProvider,
   DecodingRequest,
+  ExecutionContext,
+  ModelPricing,
   ModelSelectionRequest,
   ModelSelector,
   ToolCall,

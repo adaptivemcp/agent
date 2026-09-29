@@ -118,6 +118,19 @@ enough signal. `runAgent` emits `model_selected`, so the choice is observable
 (the REPL prefixes each turn with `[<id>]`). `--model <id>` pins one model and
 disables selection.
 
+## Feedback & guardrails
+
+- **Approvals.** `seedToolAnnotations` maps standard MCP annotations
+  (`destructiveHint`/`readOnlyHint`/`openWorldHint`) onto static risk, and the
+  `ApprovalGate` combines that with learned flakiness. `AgentRuntime.setRequestApproval`
+  lets the host install a prompt; the REPL asks `approve <tool>? — <reason>`.
+- **Learned context.** `AgentRuntime.learnedContext()` projects the store
+  (failure rate, insights, suggested model) into a short block the host injects
+  into the system prompt each turn, so evaluation output reaches the model.
+- **Cost.** The loop prices each step's tokens via `ChatModel.pricing`, splits it
+  across the step's tool calls, and records it via `observeCompleted`, so
+  routing/budget insights see real cost.
+
 ## Decisions (2026-09-28)
 
 - **Library core + CLI/TUI, CLI-first.** The seams above are library exports;

@@ -2,7 +2,7 @@ import { generateText, streamText, dynamicTool, jsonSchema, stepCountIs } from "
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ModelCapabilities } from "@adaptivemcp/spec";
-import type { ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
+import type { ChatMessage, ChatModel, ChatParams, ChatStep, ModelPricing, ToolCall, ToolSpec } from "../types.js";
 
 /**
  * The knobs this adapter can actually forward to `generateText`/`streamText`.
@@ -33,6 +33,8 @@ export interface AiSdkProviderConfig {
    * `topK`).
    */
   capabilities?: ModelCapabilities;
+  /** Per-1M-token pricing, forwarded to the `AiSdkModel` for cost accounting. */
+  pricing?: ModelPricing;
 }
 
 /**
@@ -43,14 +45,17 @@ export interface AiSdkProviderConfig {
 export class AiSdkModel implements ChatModel {
   readonly name: string;
   readonly capabilities: ModelCapabilities;
+  readonly pricing?: ModelPricing;
 
   constructor(
     private readonly model: LanguageModel,
     modelId: string,
     capabilities: ModelCapabilities = AI_SDK_CAPABILITIES,
+    pricing?: ModelPricing,
   ) {
     this.name = modelId;
     this.capabilities = capabilities;
+    this.pricing = pricing;
   }
 
   async step(messages: ChatMessage[], tools: ToolSpec[], params: ChatParams = {}): Promise<ChatStep> {
@@ -110,7 +115,7 @@ export function createAiSdkModel(config: AiSdkProviderConfig = {}): AiSdkModel {
   // Use the Chat Completions model, not the provider's default Responses API:
   // OpenAI-compatible local servers (llama.cpp, Ollama, vLLM) implement the
   // former.
-  return new AiSdkModel(provider.chat(modelId), modelId, config.capabilities);
+  return new AiSdkModel(provider.chat(modelId), modelId, config.capabilities, config.pricing);
 }
 
 /** Translate decoding `ChatParams` into AI SDK call settings. */

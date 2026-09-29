@@ -79,5 +79,6 @@ export function createChatModel(
     languageModel,
     integration.id,
     integration.capabilities ?? defaultCapabilities(integration.provider),
+    integration.pricing,
   );
 }

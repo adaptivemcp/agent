@@ -15,6 +15,7 @@ import type {
   AgentExecutor,
   ChatParams,
   DecodingProvider,
+  ExecutionContext,
   ModelSelector,
   ToolCall,
   ToolExecutionResult,
@@ -64,9 +65,11 @@ export class AgentRuntime implements AgentExecutor {
   private readonly thinClient: ThinClient;
   private readonly resolver = new DecodingResolver();
   private readonly invoke: ToolInvoker;
+  private approver: (toolName: string) => boolean | Promise<boolean>;
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
+    this.approver = options.requestApproval ?? (() => true);
     this.adaptive = new AdaptiveRuntime({
       dbPath: options.dbPath,
       yamlPath: options.yamlPath,
@@ -83,14 +86,19 @@ export class AgentRuntime implements AgentExecutor {
     this.thinClient = new ThinClient({
       memory: this.adaptive.memory,
       gate: this.adaptive.approval,
-      requestApproval: options.requestApproval ?? (() => true),
+      requestApproval: (toolName) => this.approver(toolName),
       middleware: options.middleware ?? [],
       graphTracking: this.graphTracking,
     });
   }
 
+  /** Replace the approval prompt (e.g. wire it to the REPL's y/n prompt). */
+  setRequestApproval(requestApproval: (toolName: string) => boolean | Promise<boolean>): void {
+    this.approver = requestApproval;
+  }
+
   /** Execute one tool call through approval → middleware → retry → telemetry → view. */
-  async execute(call: ToolCall, spec: ToolSpec): Promise<ToolExecutionResult> {
+  async execute(call: ToolCall, spec: ToolSpec, context?: ExecutionContext): Promise<ToolExecutionResult> {
     const startedAt = Date.now();
     let recorded: McpToolResult = { ok: true };
 
@@ -120,6 +128,8 @@ export class AgentRuntime implements AgentExecutor {
       serverName: spec.serverName,
       durationMs,
       status: recorded.ok ? "completed" : "failed",
+      model: context?.model,
+      cost: context?.cost,
       output: recorded.output,
       error: recorded.error ? { message: recorded.error } : undefined,
     });
@@ -134,6 +144,21 @@ export class AgentRuntime implements AgentExecutor {
    */
   runTurn<T>(label: string, fn: () => Promise<T>): Promise<T> {
     return this.graphTracking.runTurn(label, fn);
+  }
+
+  /**
+   * Seed static risk from the servers' standard MCP tool annotations
+   * (`destructiveHint`/`readOnlyHint`/`openWorldHint`) so the approval gate can
+   * act before anything is learned — the spec projects server `risk` onto these
+   * core hints. Advisory: an existing nonzero risk is never overridden.
+   */
+  seedToolAnnotations(specs: ToolSpec[]): void {
+    for (const spec of specs) {
+      const risk = riskFromAnnotations(spec.annotations);
+      if (!risk) continue;
+      if (this.adaptive.memory.getTool(spec.name, spec.serverName)?.annotation.risk) continue;
+      this.adaptive.memory.setAnnotation({ toolName: spec.name, serverName: spec.serverName, risk });
+    }
   }
 
   /** Run the heavier cross-tool passes (routing + orchestration). */
@@ -172,6 +197,67 @@ export class AgentRuntime implements AgentExecutor {
     };
     for (const root of roots) render(root.id, 0);
     return lines.join("\n");
+  }
+
+  /**
+   * A compact summary of what Adaptive MCP has learned about the tools, for
+   * injecting into the model's context (progressive disclosure of evaluation
+   * output). Returns `""` when nothing has been observed yet.
+   */
+  learnedContext(options: { maxTools?: number } = {}): string {
+    const records = this.adaptive.memory
+      .allTools()
+      .filter((record) => record.stats.invocations > 0)
+      .sort((a, b) => b.stats.failureRate - a.stats.failureRate)
+      .slice(0, options.maxTools ?? 8);
+    if (records.length === 0) return "";
+
+    const lines = records.map((record) => {
+      const failed = Math.round(record.stats.failureRate * 100);
+      const avg = Math.round(record.stats.avgDurationMs ?? 0);
+      const flags: string[] = [];
+      if (failed >= 20) flags.push("flaky");
+      if (record.annotation.risk) flags.push(`risk ${record.annotation.risk}`);
+      if (record.insights[0]) flags.push(record.insights[0].key);
+      const model = record.recommendations.find((rec) => rec.type === "model")?.payload as
+        | { model?: string }
+        | undefined;
+      const suffix = flags.length > 0 ? ` (${flags.join(", ")})` : "";
+      const modelHint = model?.model ? `; suggested model ${model.model}` : "";
+      return `- ${record.toolName}: ${record.stats.invocations} calls, ${failed}% failed, avg ${avg}ms${suffix}${modelHint}`;
+    });
+    return ["Learned from observed tool usage:", ...lines].join("\n");
+  }
+
+  /** A short, human-readable reason for an approval prompt on a tool. */
+  approvalReason(toolName: string, options: { serverName?: string } = {}): string | undefined {
+    const record = this.adaptive.memory.getTool(toolName, options.serverName);
+    if (!record) return undefined;
+    const parts: string[] = [];
+    if (record.annotation.risk) parts.push(`risk: ${record.annotation.risk}`);
+    if (record.stats.invocations > 0) {
+      parts.push(
+        `${Math.round(record.stats.failureRate * 100)}% fail over ${record.stats.invocations} calls`,
+      );
+    }
+    const approval = record.recommendations.find((rec) => rec.type === "approval");
+    if (approval?.rationale) parts.push(approval.rationale);
+    return parts.length > 0 ? parts.join("; ") : undefined;
+  }
+
+  /** Recorded cost per tool (from the store) for the `/cost` command. */
+  costSummary(): string {
+    const records = this.adaptive.memory
+      .allTools()
+      .filter((record) => record.stats.invocations > 0)
+      .sort((a, b) => b.stats.totalCost - a.stats.totalCost);
+    if (records.length === 0) return "(no usage yet)";
+    const total = records.reduce((sum, record) => sum + record.stats.totalCost, 0);
+    const calls = records.reduce((sum, record) => sum + record.stats.invocations, 0);
+    const lines = records.map(
+      (record) => `  ${record.toolName}: ${record.stats.invocations} calls, $${record.stats.totalCost.toFixed(6)}`,
+    );
+    return [`total: $${total.toFixed(6)} over ${calls} tool calls`, ...lines].join("\n");
   }
 
   /** The derived `tools-metadata` view (YAML by default). */
@@ -286,4 +372,15 @@ function toChatParams(recommendation: DecodingRecommendation): ChatParams | unde
   if (resolved.frequencyPenalty !== undefined) params.frequencyPenalty = resolved.frequencyPenalty;
   if (resolved.repetitionPenalty !== undefined) params.repetitionPenalty = resolved.repetitionPenalty;
   return Object.keys(params).length > 0 ? params : undefined;
+}
+
+/** Derive static risk from standard MCP tool annotations (advisory). */
+function riskFromAnnotations(
+  annotations: Record<string, unknown> | undefined,
+): "high" | "medium" | "low" | undefined {
+  if (!annotations) return undefined;
+  if (annotations.destructiveHint === true) return "high";
+  if (annotations.readOnlyHint === true) return "low";
+  if (annotations.openWorldHint === true) return "medium";
+  return undefined;
 }

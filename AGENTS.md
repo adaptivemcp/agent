@@ -75,6 +75,10 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `suggestModel(tool, { server })` — the `Router`'s learned model id for a tool.
 - `modelProvider(catalog, { tool, server })` — a `ModelSelector` for `runAgent`
   that routes each step to the learned model (or the catalog default).
+- `seedToolAnnotations(specs)` — seed static risk from standard MCP tool
+  annotations so the gate can prompt before learning.
+- `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.
+- `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
 
 ## Golden rules
 

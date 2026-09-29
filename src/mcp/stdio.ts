@@ -51,6 +51,7 @@ export class StdioToolset implements Toolset {
       description: tool.description,
       inputSchema: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
       serverName: this.serverName,
+      annotations: tool.annotations as Record<string, unknown> | undefined,
     }));
   }
 

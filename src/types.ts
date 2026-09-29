@@ -36,6 +36,8 @@ export interface ToolSpec {
   description?: string;
   inputSchema: Record<string, unknown>;
   serverName?: string;
+  /** Standard MCP tool annotations (`destructiveHint`, `readOnlyHint`, ...). */
+  annotations?: Record<string, unknown>;
 }
 
 /**
@@ -53,6 +55,12 @@ export interface ChatParams {
   frequencyPenalty?: number;
   repetitionPenalty?: number;
   maxOutputTokens?: number;
+}
+
+/** USD pricing per 1M tokens, used to turn token usage into a recorded cost. */
+export interface ModelPricing {
+  inputPerMTok: number;
+  outputPerMTok: number;
 }
 
 export interface ChatUsage {
@@ -76,6 +84,8 @@ export interface ChatModel {
    * against this, so unsupported knobs are dropped rather than approximated.
    */
   readonly capabilities?: ModelCapabilities;
+  /** Per-1M-token pricing, when known; lets the loop record real cost. */
+  readonly pricing?: ModelPricing;
   step(messages: ChatMessage[], tools: ToolSpec[], params?: ChatParams): Promise<ChatStep>;
   /**
    * Optional token streaming. When present, `runAgent` uses it (unless
@@ -135,8 +145,15 @@ export interface ToolExecutionResult {
 }
 
 /** The execution seam: routes one tool call through the Adaptive MCP loop. */
+export interface ExecutionContext {
+  /** The model that produced this tool call. */
+  model?: string;
+  /** The tool call's share of the step's model cost. */
+  cost?: { amount: number; currency?: string };
+}
+
 export interface AgentExecutor {
-  execute(call: ToolCall, spec: ToolSpec): Promise<ToolExecutionResult>;
+  execute(call: ToolCall, spec: ToolSpec, context?: ExecutionContext): Promise<ToolExecutionResult>;
   /**
    * Optional: run one model step's batch of tool calls inside a single
    * execution-graph root, so a turn with several calls forms one DAG instead of
@@ -155,6 +172,14 @@ export type AgentEvent =
   | { type: "text_delta"; text: string; step: number }
   | { type: "assistant_text"; text: string; step: number }
   | { type: "model_selected"; model: string; step: number }
+  | {
+      type: "usage";
+      model: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      cost?: number;
+      step: number;
+    }
   | { type: "decoding_applied"; params: ChatParams; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
   | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };

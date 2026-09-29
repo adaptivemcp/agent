@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatModel,
   ChatParams,
+  ChatUsage,
   DecodingProvider,
   ModelSelector,
   ToolSpec,
@@ -74,6 +75,22 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
     // events, so only emit the whole-message event on the non-streaming path.
     if (chat.text && !streamed) emit({ type: "assistant_text", text: chat.text, step });
 
+    // Cost accounting: price this step's tokens (when the model is priced) and
+    // split the step cost across its tool calls.
+    const cost = costOf(activeModel, chat.usage);
+    if (chat.usage || cost !== undefined) {
+      emit({
+        type: "usage",
+        model: activeModel.name,
+        inputTokens: chat.usage?.inputTokens,
+        outputTokens: chat.usage?.outputTokens,
+        cost,
+        step,
+      });
+    }
+    const perCallCost =
+      cost !== undefined && chat.toolCalls.length > 0 ? cost / chat.toolCalls.length : undefined;
+
     if (chat.toolCalls.length === 0) {
       if (chat.text) messages.push({ role: "assistant", content: chat.text });
       return { messages, steps: step + 1, stopReason: "completed" };
@@ -89,7 +106,10 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
         emit({ type: "tool_call", call, spec: spec ?? { name: call.name, inputSchema: {} }, step });
 
         const result = spec
-          ? await options.executor.execute(call, spec)
+          ? await options.executor.execute(call, spec, {
+              model: activeModel.name,
+              cost: perCallCost !== undefined ? { amount: perCallCost, currency: "USD" } : undefined,
+            })
           : { ok: false, error: `unknown tool: ${call.name}` };
         emit({ type: "tool_result", call, result, step });
 
@@ -120,4 +140,13 @@ function stringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/** Price a step's token usage in USD, or `undefined` when unpriced/no usage. */
+function costOf(model: ChatModel, usage: ChatUsage | undefined): number | undefined {
+  if (!model.pricing || !usage) return undefined;
+  const input = (usage.inputTokens ?? 0) * (model.pricing.inputPerMTok / 1_000_000);
+  const output = (usage.outputTokens ?? 0) * (model.pricing.outputPerMTok / 1_000_000);
+  const total = input + output;
+  return total > 0 ? Number(total.toFixed(6)) : undefined;
 }

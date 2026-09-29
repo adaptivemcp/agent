@@ -24,6 +24,7 @@ export function builtinIntegrations(env: NodeJS.ProcessEnv = process.env): Model
       apiKeyEnv: ["AI_API_KEY", LOCAL_PROVIDER_DEFAULTS.apiKeyEnv],
       costWeight: 1,
       latencyWeight: 1,
+      pricing: { inputPerMTok: 0, outputPerMTok: 0 },
       default: true,
     },
     {
@@ -35,6 +36,7 @@ export function builtinIntegrations(env: NodeJS.ProcessEnv = process.env): Model
       apiKeyEnv: "OPENAI_API_KEY",
       costWeight: 4,
       latencyWeight: 0.6,
+      pricing: { inputPerMTok: 0.15, outputPerMTok: 0.6 },
     },
     {
       id: "anthropic",
@@ -44,6 +46,7 @@ export function builtinIntegrations(env: NodeJS.ProcessEnv = process.env): Model
       apiKeyEnv: "ANTHROPIC_API_KEY",
       costWeight: 4,
       latencyWeight: 0.7,
+      pricing: { inputPerMTok: 0.8, outputPerMTok: 4 },
     },
     {
       id: "google",
@@ -53,6 +56,7 @@ export function builtinIntegrations(env: NodeJS.ProcessEnv = process.env): Model
       apiKeyEnv: "GOOGLE_GENERATIVE_AI_API_KEY",
       costWeight: 3,
       latencyWeight: 0.8,
+      pricing: { inputPerMTok: 0.1, outputPerMTok: 0.4 },
     },
   ];
 }

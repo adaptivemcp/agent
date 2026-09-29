@@ -104,6 +104,25 @@ class FixedModel implements ChatModel {
   }
 }
 
+/** A model that calls one tool (with token usage + pricing) then finishes. */
+class PricedToolModel implements ChatModel {
+  readonly name = "priced";
+  readonly pricing = { inputPerMTok: 1, outputPerMTok: 2 };
+  private cursor = 0;
+
+  async step(): Promise<ChatStep> {
+    this.cursor += 1;
+    if (this.cursor === 1) {
+      return {
+        toolCalls: [{ id: "c1", name: "search_customer", input: {} }],
+        finishReason: "tool-calls",
+        usage: { inputTokens: 1000, outputTokens: 500 },
+      };
+    }
+    return { text: "done", toolCalls: [], finishReason: "stop", usage: { inputTokens: 10, outputTokens: 5 } };
+  }
+}
+
 describe("agent loop", () => {
   it("executes a tool call, records telemetry, and completes", async () => {
     const tools = toolset();
@@ -461,6 +480,85 @@ describe("agent loop", () => {
     ]);
     const selected = await runtime.modelProvider(catalog)({ step: 0, messages: [], tools: [] });
     expect(selected?.name).toBe("tuned");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("records priced token cost on the tool call", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s15");
+    const events: AgentEvent[] = [];
+
+    await runAgent({
+      model: new PricedToolModel(),
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+      onEvent: (event) => events.push(event),
+    });
+
+    // 1000 input * $1/MTok + 500 output * $2/MTok = $0.002, attributed to the call.
+    expect(runtime.adaptive.memory.getTool("search_customer", "demo")?.stats.totalCost).toBeCloseTo(
+      0.002,
+      6,
+    );
+    expect(events.some((event) => event.type === "usage" && event.cost !== undefined)).toBe(true);
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("summarizes learned tool context and approval reasons", async () => {
+    const tools = new InMemoryToolset("demo", [
+      {
+        name: "deploy_service",
+        description: "Deploy",
+        handler: () => {
+          throw new Error("boom");
+        },
+      },
+    ]);
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s16");
+
+    for (let i = 0; i < 3; i += 1) {
+      await runtime.execute({ id: `c${i}`, name: "deploy_service", input: {} }, specs[0]!);
+    }
+
+    const context = runtime.learnedContext();
+    expect(context).toContain("deploy_service");
+    expect(context).toContain("% failed");
+    expect(runtime.approvalReason("deploy_service", { serverName: "demo" })).toMatch(/% fail/);
+    expect(runtime.costSummary()).toContain("deploy_service");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("seeds risk from MCP annotations so the gate prompts", async () => {
+    const tools = new InMemoryToolset("demo", [
+      { name: "danger", annotations: { destructiveHint: true }, handler: () => ({ ok: true }) },
+    ]);
+    const specs = await tools.listTools();
+    let asked = 0;
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s17",
+      invoke: (name, input) => tools.callTool(name, input),
+      requestApproval: () => {
+        asked += 1;
+        return true;
+      },
+    });
+
+    runtime.seedToolAnnotations(specs);
+    expect(runtime.adaptive.memory.getTool("danger", "demo")?.annotation.risk).toBe("high");
+
+    const result = await runtime.execute({ id: "c", name: "danger", input: {} }, specs[0]!);
+    expect(result.ok).toBe(true);
+    expect(asked).toBe(1);
 
     runtime.close();
     await tools.close();

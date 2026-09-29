@@ -25,6 +25,8 @@ interface CliArgs {
   listTools: boolean;
   interactive: boolean;
   noStream: boolean;
+  autoApprove: boolean;
+  context: boolean;
   verbose: boolean;
   help: boolean;
 }
@@ -35,6 +37,8 @@ function parseArgs(argv: string[]): CliArgs {
     listTools: false,
     interactive: false,
     noStream: false,
+    autoApprove: false,
+    context: true,
     verbose: false,
     help: false,
   };
@@ -87,6 +91,13 @@ function parseArgs(argv: string[]): CliArgs {
       case "--no-stream":
         args.noStream = true;
         break;
+      case "--yes":
+      case "-y":
+        args.autoApprove = true;
+        break;
+      case "--no-context":
+        args.context = false;
+        break;
       case "--verbose":
       case "-v":
         args.verbose = true;
@@ -123,6 +134,8 @@ Options:
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
+  -y, --yes                     Auto-approve require_confirmation tools (no prompt)
+  --no-context                  Don't inject learned tool context into the prompt
   -v, --verbose                 Show decoding, graph, and view after a one-shot run
   --db <path>                   SQLite store path (default: in-memory)
   --yaml <path>                 Write the derived tools-metadata view here
@@ -205,6 +218,8 @@ async function main(): Promise<void> {
       routerModels: catalog.routingOptions(),
       routerMinInvocations: args.routerMinInvocations,
     });
+    // Seed risk from standard MCP annotations so approvals can act immediately.
+    runtime.seedToolAnnotations(specs);
 
     const stream = !args.noStream;
     const maxSteps = args.maxSteps ?? 8;
@@ -223,6 +238,9 @@ async function main(): Promise<void> {
         selectModel,
         maxSteps,
         stream,
+        approvals: !args.autoApprove,
+        context: args.context ? () => runtime.learnedContext() : undefined,
+        cost: () => runtime.costSummary(),
         metadata: () => runtime.toolsMetadata(),
         graph: () => runtime.graphView(),
         models: () => catalog.describe(),
@@ -237,6 +255,8 @@ async function main(): Promise<void> {
       return;
     }
 
+    const baseSystem = "You are an MCP-native agent. Use the available tools when helpful.";
+    const learned = args.context ? runtime.learnedContext() : "";
     const result = await runAgent({
       model: defaultModel,
       tools: specs,
@@ -246,7 +266,7 @@ async function main(): Promise<void> {
       selectModel,
       stream,
       messages: [
-        { role: "system", content: "You are an MCP-native agent. Use the available tools when helpful." },
+        { role: "system", content: learned ? `${baseSystem}\n\n${learned}` : baseSystem },
         { role: "user", content: args.prompt },
       ],
       onEvent: (event) => renderOneShot(event, args.verbose),
@@ -274,6 +294,9 @@ function renderOneShot(event: AgentEvent, verbose: boolean): void {
       break;
     case "model_selected":
       if (verbose) console.log(`· model ${event.model}`);
+      break;
+    case "usage":
+      if (verbose && event.cost !== undefined) console.log(`· cost $${event.cost.toFixed(6)}`);
       break;
     case "decoding_applied":
       if (verbose) console.log(`· decoding ${JSON.stringify(event.params)}`);
