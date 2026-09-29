@@ -378,6 +378,7 @@ async function main(): Promise<void> {
         context: args.context ? () => runtime.learnedContext() : undefined,
         cost: () => runtime.costSummary(),
         policy: () => runtime.serverPolicySummary(),
+        drift: () => runtime.metricDriftReport(),
         historyPath: args.history,
         retrieve: headroom
           ? async (hash) => {

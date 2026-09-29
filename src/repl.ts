@@ -34,6 +34,8 @@ export interface ReplOptions {
   cost?: () => string;
   /** Text for `/policy` (server-governed policy in effect). */
   policy?: () => string;
+  /** Text for `/drift` (recent-vs-lifetime metric drift). */
+  drift?: () => string;
   /** Retrieve a compressed tool output's original by hash (`/retrieve <hash>`). */
   retrieve?: (hash: string) => Promise<string>;
   /** JSON file to persist/restore the conversation across runs. */
@@ -97,7 +99,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /retrieve <hash>, /decoding <tool>, /decoding-report, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /drift, /retrieve <hash>, /decoding <tool>, /decoding-report, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -194,6 +196,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /cost               show recorded cost per tool\n" +
                 "  /policy             show the server-governed policy in effect\n" +
+                "  /drift              show recent-vs-lifetime metric drift\n" +
                 "  /retrieve [hash]     fetch a compressed tool output's original (default: last)\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /decoding-report    summarized applied-decoding telemetry\n" +
@@ -221,6 +224,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/policy":
             output.write(options.policy ? `${options.policy()}\n` : color.dim("(no policy)\n"));
+            continue;
+          case "/drift":
+            output.write(options.drift ? `${options.drift()}\n` : color.dim("(no drift data)\n"));
             continue;
           case "/retrieve":
             if (!options.retrieve) {

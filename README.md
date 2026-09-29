@@ -56,7 +56,8 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
 `/models`, `/graph` (the per-turn execution DAG), `/metadata`, `/cost`,
-`/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`, `/reset`, `/exit`.
+`/policy`, `/drift`, `/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`,
+`/reset`, `/exit`.
 
 - **Approvals.** Tools the gate marks `require_confirmation` — high-risk from the
   server's standard MCP annotations, or learned-flaky — prompt

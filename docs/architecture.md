@@ -146,6 +146,10 @@ disables selection.
 - **Reporting.** `AgentRuntime`'s `onExecuted` hook lets the host report each
   observation to servers exposing `report_observation` (`--report`), closing the
   client→server loop.
+- **Drift & clustering.** `AgentRuntime.metricDriftReport()` compares the latest
+  hourly metric cell to the lifetime cell (`/drift`); `Evaluator.evaluateCooccurrence`
+  surfaces tools that cluster in the same session, injected into the learned
+  context ("often with …").
 - **Server governance.** `StdioToolset` advertises the extension and reads
   `dev.adaptivemcp://tools-metadata`; `AgentRuntime.applyServerMetadata` applies
   the published annotation/`require_approval`/budget as a floor (never overriding

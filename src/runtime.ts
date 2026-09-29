@@ -1,5 +1,6 @@
 import { AdaptiveRuntime } from "@adaptivemcp/runtime";
 import { GraphTrackingMiddleware, ThinClient, type ToolHandler } from "@adaptivemcp/thin-client";
+import { computeMetricDrift } from "@adaptivemcp/evaluation";
 import { GraphAnalyzer } from "@adaptivemcp/graph-analysis";
 import type { MemoryStore } from "@adaptivemcp/memory";
 import type { RetryPolicy } from "@adaptivemcp/orchestration";
@@ -342,6 +343,10 @@ export class AgentRuntime implements AgentExecutor {
       if (failed >= 20) flags.push("flaky");
       if (record.annotation.risk) flags.push(`risk ${record.annotation.risk}`);
       if (record.insights[0]) flags.push(record.insights[0].key);
+      const cooccurrence = record.insights.find((insight) => insight.key === "tool_cooccurrence")?.value as
+        | Array<{ tool?: string }>
+        | undefined;
+      if (cooccurrence?.[0]?.tool) flags.push(`often with ${cooccurrence[0].tool}`);
       const retry = this.retryPolicyFor(record.toolName, record.serverName);
       if (retry?.enabled && retry.maxAttempts > 1) flags.push(`retry x${retry.maxAttempts}`);
       const model = record.recommendations.find((rec) => rec.type === "model")?.payload as
@@ -464,6 +469,22 @@ export class AgentRuntime implements AgentExecutor {
           `${group.invocations} calls, ${Math.round(group.failureRate * 100)}% failed, ` +
           `avg ${group.avgDurationMs}ms${tokens}`
         );
+      })
+      .join("\n");
+  }
+
+  /**
+   * Recent-vs-lifetime drift per tool, from the durable metric cells
+   * (`computeMetricDrift`). Powers the REPL's `/drift` command.
+   */
+  metricDriftReport(options: { minRecentInvocations?: number } = {}): string {
+    const drifts = computeMetricDrift(this.adaptive.memory.metricCells?.() ?? [], options);
+    if (drifts.length === 0) return "(no drift data yet)";
+    return drifts
+      .map((drift) => {
+        const failure = `${drift.failureRateDelta >= 0 ? "+" : ""}${(drift.failureRateDelta * 100).toFixed(1)}pp`;
+        const latency = `${drift.latencyDeltaMs >= 0 ? "+" : ""}${drift.latencyDeltaMs}ms`;
+        return `  ${drift.toolName} [${drift.window}] ${drift.direction}: failure ${failure}, latency ${latency}`;
       })
       .join("\n");
   }

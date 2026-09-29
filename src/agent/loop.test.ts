@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
 import type { Middleware } from "@adaptivemcp/middleware";
-import { InMemoryToolset } from "../mcp/toolset.js";
+import { AggregateToolset, InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
@@ -684,6 +684,96 @@ describe("agent loop", () => {
     expect(record?.annotation.owner).toBe("platform");
     expect(record?.annotation.risk).toBe("high");
     expect(runtime.serverPolicySummary()).toContain("x");
+
+    runtime.close();
+  });
+
+  it("aggregates tools from multiple servers into one derived view", async () => {
+    const alpha = new InMemoryToolset("alpha", [{ name: "one", handler: () => ({ ok: true }) }]);
+    const beta = new InMemoryToolset("beta", [{ name: "two", handler: () => ({ ok: true }) }]);
+    const aggregate = new AggregateToolset([alpha, beta]);
+    const specs = await aggregate.listTools();
+    expect(specs.map((spec) => spec.name).sort()).toEqual(["alpha_one", "beta_two"]);
+
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s22",
+      invoke: (name, input) => aggregate.callTool(name, input),
+    });
+    await runtime.execute(
+      { id: "c1", name: "alpha_one", input: {} },
+      specs.find((spec) => spec.name === "alpha_one")!,
+    );
+    await runtime.execute(
+      { id: "c2", name: "beta_two", input: {} },
+      specs.find((spec) => spec.name === "beta_two")!,
+    );
+
+    const view = runtime.toolsMetadata();
+    expect(view).toContain("alpha_one");
+    expect(view).toContain("beta_two");
+
+    runtime.close();
+    await alpha.close();
+    await beta.close();
+  });
+
+  it("includes learned co-occurrence in the model context", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s23");
+    const searchSpec = specs.find((spec) => spec.name === "search_customer")!;
+    await runtime.execute({ id: "c", name: "search_customer", input: {} }, searchSpec);
+
+    runtime.adaptive.memory.addInsight({
+      toolName: "search_customer",
+      serverName: "demo",
+      key: "tool_cooccurrence",
+      value: [{ tool: "deploy_service", sessions: 3, support: 1 }],
+      confidence: 0.65,
+      source: "evaluation",
+      observedAt: new Date().toISOString(),
+      sampleSize: 3,
+    });
+
+    expect(runtime.learnedContext()).toContain("often with deploy_service");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("reports metric drift from hourly cells", () => {
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s24",
+      invoke: async () => ({ ok: true }),
+    });
+    const hourA = "2026-09-29T10:00:00.000Z";
+    const hourB = "2026-09-29T11:00:00.000Z";
+    for (let i = 0; i < 4; i += 1) {
+      runtime.adaptive.memory.recordExecution({
+        id: `a${i}`,
+        toolName: "t",
+        serverName: "s",
+        timestamp: hourA,
+        status: "completed",
+        durationMs: 100,
+      });
+    }
+    for (let i = 0; i < 4; i += 1) {
+      runtime.adaptive.memory.recordExecution({
+        id: `b${i}`,
+        toolName: "t",
+        serverName: "s",
+        timestamp: hourB,
+        status: i < 3 ? "failed" : "completed",
+        durationMs: 300,
+      });
+    }
+
+    const report = runtime.metricDriftReport();
+    expect(report).toContain("regressing");
+    expect(report).toContain("t");
 
     runtime.close();
   });
