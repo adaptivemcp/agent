@@ -1,5 +1,8 @@
 import { AdaptiveRuntime } from "@adaptivemcp/runtime";
 import { GraphTrackingMiddleware, ThinClient, type ToolHandler } from "@adaptivemcp/thin-client";
+import { GraphAnalyzer } from "@adaptivemcp/graph-analysis";
+import type { MemoryStore } from "@adaptivemcp/memory";
+import type { RetryPolicy } from "@adaptivemcp/orchestration";
 import type { Middleware } from "@adaptivemcp/middleware";
 import type { ApprovalPolicy } from "@adaptivemcp/approval";
 import {
@@ -27,6 +30,16 @@ import type { McpToolResult } from "./mcp/toolset.js";
 /** Performs the raw MCP tool call (transport lives behind this seam). */
 export type ToolInvoker = (toolName: string, input: unknown, serverName?: string) => Promise<McpToolResult>;
 
+/** A finished tool execution, surfaced for cross-client reporting. */
+export interface ExecutionObservation {
+  toolName: string;
+  serverName?: string;
+  status: "completed" | "failed";
+  durationMs: number;
+  model?: string;
+  cost?: { amount: number; currency?: string };
+}
+
 export interface AgentRuntimeOptions {
   /** SQLite path for the store. Defaults to in-memory. */
   dbPath?: string;
@@ -49,6 +62,8 @@ export interface AgentRuntimeOptions {
   routerBudget?: BudgetPolicy;
   /** Minimum invocations before the router trusts observed stats. */
   routerMinInvocations?: number;
+  /** Called after each tool execution (e.g. to report to a governing server). */
+  onExecuted?: (observation: ExecutionObservation) => void;
 }
 
 /**
@@ -66,10 +81,13 @@ export class AgentRuntime implements AgentExecutor {
   private readonly resolver = new DecodingResolver();
   private readonly invoke: ToolInvoker;
   private approver: (toolName: string) => boolean | Promise<boolean>;
+  private readonly onExecuted?: (observation: ExecutionObservation) => void;
+  private readonly warnedSignals = new Set<string>();
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
     this.approver = options.requestApproval ?? (() => true);
+    this.onExecuted = options.onExecuted;
     this.adaptive = new AdaptiveRuntime({
       dbPath: options.dbPath,
       yamlPath: options.yamlPath,
@@ -132,6 +150,15 @@ export class AgentRuntime implements AgentExecutor {
       cost: context?.cost,
       output: recorded.output,
       error: recorded.error ? { message: recorded.error } : undefined,
+    });
+
+    this.onExecuted?.({
+      toolName: spec.name,
+      serverName: spec.serverName,
+      status: recorded.ok ? "completed" : "failed",
+      durationMs,
+      model: context?.model,
+      cost: context?.cost,
     });
 
     return { ok: recorded.ok, error: recorded.error, output: recorded.output, decision: outcome.decision };
@@ -219,6 +246,8 @@ export class AgentRuntime implements AgentExecutor {
       if (failed >= 20) flags.push("flaky");
       if (record.annotation.risk) flags.push(`risk ${record.annotation.risk}`);
       if (record.insights[0]) flags.push(record.insights[0].key);
+      const retry = this.retryPolicyFor(record.toolName, record.serverName);
+      if (retry?.enabled && retry.maxAttempts > 1) flags.push(`retry x${retry.maxAttempts}`);
       const model = record.recommendations.find((rec) => rec.type === "model")?.payload as
         | { model?: string }
         | undefined;
@@ -226,7 +255,65 @@ export class AgentRuntime implements AgentExecutor {
       const modelHint = model?.model ? `; suggested model ${model.model}` : "";
       return `- ${record.toolName}: ${record.stats.invocations} calls, ${failed}% failed, avg ${avg}ms${suffix}${modelHint}`;
     });
-    return ["Learned from observed tool usage:", ...lines].join("\n");
+    const procedure = this.learnedProcedure();
+    const learned = ["Learned from observed tool usage:", ...lines];
+    if (procedure) learned.push(`Observed procedure: ${procedure}`);
+    return learned.join("\n");
+  }
+
+  /**
+   * A repeated tool sequence Adaptive MCP has learned for this workflow, if any
+   * (planning hint from graph-analysis `detectCommonPatterns`).
+   */
+  learnedProcedure(): string | undefined {
+    const workflowId = this.graphTracking.getWorkflowId();
+    if (!workflowId) return undefined;
+    const analyzer = new GraphAnalyzer(this.adaptive.memory as MemoryStore);
+    const patterns = analyzer.detectCommonPatterns(workflowId, 3);
+    if (patterns.length === 0) return undefined;
+    return [...patterns].sort((a, b) => b.frequency - a.frequency)[0]?.pattern;
+  }
+
+  /**
+   * Current execution-graph warnings for this session (failure cascades and
+   * anomalies), via `GraphAnalyzer`. Empty when nothing is wrong.
+   */
+  graphSignals(): string[] {
+    const sessionId = this.sessionId();
+    const analyzer = new GraphAnalyzer(this.adaptive.memory as MemoryStore);
+    const signals: string[] = [];
+    for (const cascade of analyzer.getFailureCascade(sessionId)) {
+      signals.push(
+        `failure cascade from ${cascade.rootCause.toolName} affecting ${cascade.blastRadius} node(s)`,
+      );
+    }
+    for (const anomaly of analyzer.detectAnomalies(sessionId)) {
+      signals.push(`${anomaly.type}: ${anomaly.description}`);
+    }
+    return signals;
+  }
+
+  /**
+   * Post-step guardrail for `runAgent`: surface each new graph signal once as a
+   * steering message. Returns `undefined` when there is nothing new.
+   */
+  review(): string | undefined {
+    const fresh = this.graphSignals().filter((signal) => !this.warnedSignals.has(signal));
+    if (fresh.length === 0) return undefined;
+    for (const signal of fresh) this.warnedSignals.add(signal);
+    return `Execution-graph warning: ${fresh.join("; ")}. Consider a different approach or stopping.`;
+  }
+
+  /** The learned retry policy for a tool, if the store has a workflow recommendation. */
+  private retryPolicyFor(toolName: string, serverName?: string): RetryPolicy | undefined {
+    const payload = this.adaptive.memory
+      .getTool(toolName, serverName)
+      ?.recommendations.find(
+        (rec) => rec.type === "workflow" && rec.payload != null && typeof rec.payload === "object" && "retry" in rec.payload,
+      )?.payload;
+    return payload && typeof payload === "object" && "retry" in payload
+      ? (payload as { retry: RetryPolicy }).retry
+      : undefined;
   }
 
   /** A short, human-readable reason for an approval prompt on a tool. */

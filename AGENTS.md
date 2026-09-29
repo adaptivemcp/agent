@@ -80,6 +80,9 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   annotations so the gate can prompt before learning.
 - `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.
 - `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
+- `learnedProcedure()` — a repeated tool sequence for this workflow (planning).
+- `graphSignals()` / `review()` — graph-aware guardrails injected per step.
+- `onExecuted` option — report observations to governing servers.
 
 ## Golden rules
 

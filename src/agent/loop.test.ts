@@ -6,7 +6,7 @@ import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
 import { runAgent } from "./loop.js";
-import type { AgentEvent, ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
+import type { AgentEvent, AgentExecutor, ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
 
 /** Wraps a model to capture the params the loop passes to each completion. */
 class RecordingModel implements ChatModel {
@@ -583,6 +583,60 @@ describe("agent loop", () => {
 
     const result = await runtime.execute({ id: "c", name: "echo", input: {} }, specs[0]!);
     expect(result.output).toBe("HELLO");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("lets the executor inject a post-step guard message", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const base = await runtimeFor(tools, "s19");
+    const executor: AgentExecutor = {
+      execute: (call, spec, context) => base.execute(call, spec, context),
+      runTurn: (label, fn) => base.runTurn(label, fn),
+      review: () => "guard message",
+    };
+    const events: AgentEvent[] = [];
+    const model = new ScriptedModel([
+      { toolCalls: [{ name: "search_customer", input: {} }] },
+      { text: "done" },
+    ]);
+
+    const result = await runAgent({
+      model,
+      tools: specs,
+      executor,
+      messages: [{ role: "user", content: "go" }],
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "guard" && event.message === "guard message")).toBe(true);
+    expect(result.messages.some((message) => message.content === "guard message")).toBe(true);
+
+    base.close();
+    await tools.close();
+  });
+
+  it("surfaces execution observations and has no graph signals initially", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const observations: Array<{ toolName: string; status: string }> = [];
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s20",
+      invoke: (name, input) => tools.callTool(name, input),
+      onExecuted: (observation) => observations.push(observation),
+    });
+
+    expect(runtime.graphSignals()).toEqual([]);
+    expect(runtime.review()).toBeUndefined();
+
+    const searchSpec = specs.find((spec) => spec.name === "search_customer")!;
+    await runtime.execute({ id: "c", name: "search_customer", input: {} }, searchSpec);
+    expect(observations).toHaveLength(1);
+    expect(observations[0]?.toolName).toBe("search_customer");
+    expect(observations[0]?.status).toBe("completed");
 
     runtime.close();
     await tools.close();

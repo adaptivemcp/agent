@@ -160,6 +160,11 @@ export interface AgentExecutor {
    * one disconnected root per call. Implemented by `AgentRuntime`.
    */
   runTurn?<T>(label: string, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Optional post-step review (e.g. graph-aware guardrails). Return a message to
+   * steer the next step, or `undefined` to continue unchanged.
+   */
+  review?(context: { step: number }): string | undefined | Promise<string | undefined>;
 }
 
 export interface AgentRunResult {
@@ -181,6 +186,7 @@ export type AgentEvent =
       step: number;
     }
   | { type: "decoding_applied"; params: ChatParams; step: number }
+  | { type: "guard"; message: string; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
   | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };
 

@@ -126,6 +126,10 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           output.write(color.dim(`  · $${event.cost.toFixed(6)} (${event.model})\n`));
         }
         break;
+      case "guard":
+        ensureNewline();
+        output.write(color.dim(`  ⚠ ${event.message}\n`));
+        break;
       case "tool_call":
         ensureNewline();
         output.write(

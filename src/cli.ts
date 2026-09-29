@@ -30,7 +30,9 @@ interface CliArgs {
   routerMinInvocations?: number;
   session?: string;
   history?: string;
+  workflow?: string;
   compress: boolean;
+  report: boolean;
   listTools: boolean;
   interactive: boolean;
   noStream: boolean;
@@ -49,6 +51,7 @@ function parseArgs(argv: string[]): CliArgs {
     autoApprove: false,
     context: true,
     compress: false,
+    report: false,
     verbose: false,
     help: false,
   };
@@ -97,8 +100,14 @@ function parseArgs(argv: string[]): CliArgs {
       case "--history":
         args.history = next();
         break;
+      case "--workflow":
+        args.workflow = next();
+        break;
       case "--compress":
         args.compress = true;
+        break;
+      case "--report":
+        args.report = true;
         break;
       case "--list-tools":
         args.listTools = true;
@@ -162,7 +171,9 @@ Options:
   --router-min-invocations <n>  Invocations before the router trusts stats (default: 10)
   --session <id>                Stable session id (accumulate graph/stats across runs)
   --history <file>              Persist/restore the conversation (JSON)
+  --workflow <id>               Workflow id for cross-session graph/pattern learning
   --compress                    Compress large tool output via the headroom MCP server
+  --report                      Report observations to servers exposing report_observation
   --list-tools                  List discovered tools and exit
   -h, --help                    Show this help
 `);
@@ -258,14 +269,42 @@ async function main(): Promise<void> {
       return;
     }
 
+    const sessionId = args.session ?? `cli-${Date.now()}`;
+    const reportToolByServer = new Map<string, string>();
+    for (const spec of specs) {
+      if (spec.name.endsWith("report_observation")) {
+        reportToolByServer.set(spec.serverName ?? "", spec.name);
+      }
+    }
+
     const runtime = new AgentRuntime({
       dbPath: args.db,
       yamlPath: args.yaml,
-      sessionId: args.session ?? `cli-${Date.now()}`,
+      sessionId,
+      workflowId: args.workflow,
       invoke: (name, input) => tools.callTool(name, input),
       middleware,
       routerModels: catalog.routingOptions(),
       routerMinInvocations: args.routerMinInvocations,
+      onExecuted: args.report
+        ? (observation) => {
+            const reportTool =
+              observation.serverName !== undefined
+                ? reportToolByServer.get(observation.serverName)
+                : undefined;
+            if (!reportTool) return;
+            void tools
+              .callTool(reportTool, {
+                tool: observation.toolName,
+                status: observation.status === "completed" ? "success" : "failure",
+                duration_ms: observation.durationMs,
+                cost: observation.cost?.amount,
+                timestamp: new Date().toISOString(),
+                client_id: sessionId,
+              })
+              .catch(() => undefined);
+          }
+        : undefined,
     });
     // Seed risk from standard MCP annotations so approvals can act immediately.
     runtime.seedToolAnnotations(specs);

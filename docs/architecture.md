@@ -134,6 +134,13 @@ disables selection.
   server via `HeadroomMiddleware` (`--compress`), with originals retrievable by
   hash (`/retrieve`); `--history` persists the conversation and `--session` keeps
   the graph/stats session stable.
+- **Guardrails & planning.** After each step the loop calls `AgentExecutor.review`;
+  `AgentRuntime.review` surfaces new execution-graph signals (failure cascades /
+  anomalies) as a steering message (`guard` event). `learnedContext` may include a
+  repeated tool procedure from graph-analysis common patterns.
+- **Reporting.** `AgentRuntime`'s `onExecuted` hook lets the host report each
+  observation to servers exposing `report_observation` (`--report`), closing the
+  client→server loop.
 
 ## Decisions (2026-09-28)
 

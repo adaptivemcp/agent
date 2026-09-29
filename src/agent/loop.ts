@@ -127,6 +127,14 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
     } else {
       await runToolCalls();
     }
+
+    // Post-step guardrail: let the executor inject a steering message based on
+    // what it observed (e.g. execution-graph failure signals).
+    const guard = await options.executor.review?.({ step });
+    if (guard) {
+      emit({ type: "guard", message: guard, step });
+      messages.push({ role: "user", content: guard });
+    }
   }
 
   return { messages, steps: maxSteps, stopReason: "max_steps" };

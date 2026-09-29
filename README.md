@@ -70,6 +70,12 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   server (`HeadroomMiddleware`); `/retrieve` fetches the original by hash.
 - **Persistence.** `--history <file>` restores and saves the conversation as
   JSON; `--session <id>` keeps the graph/stats session stable across runs.
+- **Reporting.** `--report` sends each tool observation back to servers that
+  expose the `report_observation` tool (the spec-legal client→server channel).
+- **Guardrails & planning.** `--workflow <id>` enables cross-session
+  graph/pattern learning: the learned context can include an observed tool
+  procedure, and new failure-cascade/anomaly signals are injected into the
+  conversation as warnings.
 
 ## Models
 
