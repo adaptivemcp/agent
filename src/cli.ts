@@ -4,19 +4,24 @@ import { StdioToolset } from "./mcp/stdio.js";
 import { AgentRuntime } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
-import { createAiSdkModel } from "./provider/ai-sdk.js";
-import { exampleServerOptions, parseServer, providerConfigFromEnv } from "./config.js";
-import type { AgentEvent } from "./types.js";
+import { exampleServerOptions, parseServer } from "./config.js";
+import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
+import { loadCatalog, type ModelCatalog } from "./models/catalog.js";
+import type { AgentEvent, ChatModel } from "./types.js";
 
 interface CliArgs {
   prompt?: string;
+  /** Catalog id to pin (disables adaptive model selection). */
   model?: string;
+  /** Catalog file for extra/overridden integrations. */
+  models?: string;
   baseUrl?: string;
   apiKey?: string;
   servers: string[];
   db?: string;
   yaml?: string;
   maxSteps?: number;
+  routerMinInvocations?: number;
   listTools: boolean;
   interactive: boolean;
   noStream: boolean;
@@ -48,6 +53,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "--model":
         args.model = next();
         break;
+      case "--models":
+        args.models = next();
+        break;
       case "--base-url":
         args.baseUrl = next();
         break;
@@ -65,6 +73,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--max-steps":
         args.maxSteps = Number(next());
+        break;
+      case "--router-min-invocations":
+        args.routerMinInvocations = Number(next());
         break;
       case "--list-tools":
         args.listTools = true;
@@ -99,20 +110,24 @@ Usage:
   adaptivemcp-agent [--prompt "..."] [--server "name=command args"] [options]
 
   With no --prompt, starts an interactive REPL (streaming, multi-turn).
+  Adaptive MCP picks the model per tool from the model catalog unless --model
+  pins one.
 
 Options:
   --server <name=command args>  MCP server over stdio (repeatable)
                                 (default: the sibling adaptive-mcp example server)
   --prompt <text>               One-shot prompt instead of the interactive REPL
   -i, --interactive             Force the interactive REPL
-  --model <id>                  Model id (default: env AI_MODEL or the local llama.cpp server)
-  --base-url <url>              OpenAI-compatible base URL (default: env AI_BASE_URL)
-  --api-key <key>               API key (default: env AI_API_KEY or LLAMA_API_KEY)
+  --model <id>                  Pin one catalog model (disables adaptive selection)
+  --models <file>               Catalog file of model integrations (JSON)
+  --base-url <url>              Override the local integration's base URL
+  --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
-  -v, --verbose                 Show applied decoding and metadata after the run
+  -v, --verbose                 Show decoding, graph, and view after a one-shot run
   --db <path>                   SQLite store path (default: in-memory)
   --yaml <path>                 Write the derived tools-metadata view here
   --max-steps <n>               Max agent steps per turn (default: 8)
+  --router-min-invocations <n>  Invocations before the router trusts stats (default: 10)
   --list-tools                  List discovered tools and exit
   -h, --help                    Show this help
 `);
@@ -124,13 +139,6 @@ async function main(): Promise<void> {
     printHelp();
     return;
   }
-
-  const envProvider = providerConfigFromEnv();
-  const providerConfig = {
-    model: args.model ?? envProvider.model,
-    baseURL: args.baseUrl ?? envProvider.baseURL,
-    apiKey: args.apiKey ?? envProvider.apiKey,
-  };
 
   const fallbackServer = exampleServerOptions();
   const serverSpecs =
@@ -149,6 +157,34 @@ async function main(): Promise<void> {
     return;
   }
 
+  // `--base-url`/`--api-key` override the local integration via the env the
+  // built-in catalog reads.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (args.baseUrl) env.AI_BASE_URL = args.baseUrl;
+  if (args.apiKey) env.AI_API_KEY = args.apiKey;
+
+  let catalog: ModelCatalog;
+  try {
+    catalog = loadCatalog({ file: args.models, env });
+  } catch (error) {
+    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let pinned: ChatModel | undefined;
+  if (args.model) {
+    pinned = catalog.get(args.model);
+    if (!pinned) {
+      console.error(
+        `error: unknown model "${args.model}". Available: ${catalog.list().map((m) => m.id).join(", ")}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
+  const defaultModel = pinned ?? catalog.defaultModel();
+
   const toolsets = serverSpecs.map((options) => new StdioToolset(options.serverName, options));
   const tools = new AggregateToolset(toolsets);
 
@@ -166,24 +202,32 @@ async function main(): Promise<void> {
       yamlPath: args.yaml,
       sessionId: `cli-${Date.now()}`,
       invoke: (name, input) => tools.callTool(name, input),
+      routerModels: catalog.routingOptions(),
+      routerMinInvocations: args.routerMinInvocations,
     });
-    const model = createAiSdkModel(providerConfig);
+
     const stream = !args.noStream;
     const maxSteps = args.maxSteps ?? 8;
+    // Adaptive MCP selects the model per tool unless one was pinned.
+    const selectModel = pinned ? undefined : runtime.modelProvider(catalog);
+    const capabilities = defaultModel.capabilities ?? AI_SDK_CAPABILITIES;
+    const decoding = runtime.decodingProvider(capabilities);
 
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       await runRepl({
-        model,
+        model: defaultModel,
         tools: specs,
         executor: runtime,
-        decoding: runtime.decodingProvider(model.capabilities),
+        decoding,
+        selectModel,
         maxSteps,
         stream,
         metadata: () => runtime.toolsMetadata(),
         graph: () => runtime.graphView(),
+        models: () => catalog.describe(),
         decodingFor: (tool) => {
-          const recommendation = runtime.suggestDecoding(tool, model.capabilities, {
+          const recommendation = runtime.suggestDecoding(tool, capabilities, {
             serverName: serverByTool.get(tool),
           });
           return recommendation ? JSON.stringify(recommendation, null, 2) : undefined;
@@ -194,11 +238,12 @@ async function main(): Promise<void> {
     }
 
     const result = await runAgent({
-      model,
+      model: defaultModel,
       tools: specs,
       executor: runtime,
       maxSteps,
-      decoding: runtime.decodingProvider(model.capabilities),
+      decoding,
+      selectModel,
       stream,
       messages: [
         { role: "system", content: "You are an MCP-native agent. Use the available tools when helpful." },
@@ -226,6 +271,9 @@ function renderOneShot(event: AgentEvent, verbose: boolean): void {
       break;
     case "assistant_text":
       console.log(event.text);
+      break;
+    case "model_selected":
+      if (verbose) console.log(`· model ${event.model}`);
       break;
     case "decoding_applied":
       if (verbose) console.log(`· decoding ${JSON.stringify(event.params)}`);

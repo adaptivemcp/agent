@@ -102,6 +102,22 @@ the backend advertises through `ChatModel.capabilities` (`AiSdkModel` defaults t
 event, so the adaptation is observable. This is what "the agent owns its LLM call"
 buys: a recommendation that a provider-hosted runner could not apply.
 
+## Model catalog & routing
+
+`src/models/` holds the agent's **catalog** of model integrations
+(`openai-compatible`, `anthropic`, `google`), built from presets plus an optional
+catalog file (`--models` / `$AGENT_MODELS`). Only integrations whose key is
+present are active.
+
+`ModelCatalog.routingOptions()` feeds the `Router` (via `AgentRuntime`'s
+`routerModels`), so a tool's learned `model` recommendation references a model
+the agent can actually run. `AgentRuntime.modelProvider` builds a `ModelSelector`
+for `runAgent`: each step it reads the recommendation for the governing tool and
+returns that `ChatModel`, falling back to the catalog default when there is not
+enough signal. `runAgent` emits `model_selected`, so the choice is observable
+(the REPL prefixes each turn with `[<id>]`). `--model <id>` pins one model and
+disables selection.
+
 ## Decisions (2026-09-28)
 
 - **Library core + CLI/TUI, CLI-first.** The seams above are library exports;
@@ -122,6 +138,7 @@ buys: a recommendation that a provider-hosted runner could not apply.
    full-screen TUI (opencode-inspired) over the same library core is next.
 3. **Done:** per-turn workflow DAGs — `AgentRuntime.runTurn` groups a step's tool
    calls under one `agent_turn_<n>` root.
-4. **Partly done:** token streaming in `AiSdkModel.stream`; more providers via the
-   AI SDK next.
+4. **Done:** model catalog with OpenAI-compatible + Anthropic + Google
+   integrations and learned per-tool routing (`AgentRuntime.modelProvider`);
+   token streaming in `AiSdkModel.stream`.
 5. Publish the library as a consumable package.

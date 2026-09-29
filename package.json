@@ -45,6 +45,8 @@
     "@adaptivemcp/spec": "link:../adaptive-mcp/packages/spec",
     "@adaptivemcp/telemetry": "link:../adaptive-mcp/packages/telemetry",
     "@adaptivemcp/thin-client": "link:../adaptive-mcp/packages/thin-client",
+    "@ai-sdk/anthropic": "^4.0.65",
+    "@ai-sdk/google": "^4.0.82",
     "@ai-sdk/openai": "^4.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ai": "^7.0.0",

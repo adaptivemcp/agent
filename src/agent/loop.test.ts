@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
 import { InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
+import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
 import { runAgent } from "./loop.js";
 import type { AgentEvent, ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
@@ -79,6 +80,28 @@ async function runtimeFor(tools: InMemoryToolset, sessionId = "s1"): Promise<Age
     sessionId,
     invoke: (name, input) => tools.callTool(name, input),
   });
+}
+
+/** A model that always returns one fixed message; useful for model-selection tests. */
+class FixedModel implements ChatModel {
+  constructor(
+    readonly name: string,
+    private readonly text: string,
+  ) {}
+
+  async step(): Promise<ChatStep> {
+    return { text: this.text, toolCalls: [], finishReason: "stop" };
+  }
+
+  async stream(
+    _messages: ChatMessage[],
+    _tools: ToolSpec[],
+    _params: ChatParams,
+    onTextDelta: (text: string) => void,
+  ): Promise<ChatStep> {
+    onTextDelta(this.text);
+    return { text: this.text, toolCalls: [], finishReason: "stop" };
+  }
 }
 
 describe("agent loop", () => {
@@ -364,6 +387,80 @@ describe("agent loop", () => {
     expect(view).toContain("agent_turn_0");
     expect(view).toContain("search_customer");
     expect(view).toContain("deploy_service");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("selects the model per step and reports it", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s12");
+    const base = new FixedModel("base", "from base");
+    const chosen = new FixedModel("chosen", "from chosen");
+    const events: AgentEvent[] = [];
+
+    const result = await runAgent({
+      model: base,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "hi" }],
+      selectModel: () => chosen,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "model_selected" && event.model === "chosen")).toBe(true);
+    expect(result.messages.at(-1)?.content).toBe("from chosen");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("falls back to the default model when the selector declines", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s13");
+    const base = new FixedModel("base", "from base");
+    const events: AgentEvent[] = [];
+
+    const result = await runAgent({
+      model: base,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "hi" }],
+      selectModel: () => undefined,
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "model_selected")).toBe(false);
+    expect(result.messages.at(-1)?.content).toBe("from base");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("routes to the model Adaptive MCP learned for the governing tool", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const searchSpec = specs.find((spec) => spec.name === "search_customer")!;
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s14",
+      invoke: (name, input) => tools.callTool(name, input),
+      routerModels: [{ id: "tuned", costWeight: 1, latencyWeight: 1 }],
+      routerMinInvocations: 1,
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      await runtime.execute({ id: `c${i}`, name: "search_customer", input: {} }, searchSpec);
+    }
+    expect(runtime.suggestModel("search_customer", { serverName: "demo" })).toBe("tuned");
+
+    const catalog = new ModelCatalog([
+      { id: "tuned", provider: "openai-compatible", model: "tiny", baseURL: "http://127.0.0.1:9/v1" },
+    ]);
+    const selected = await runtime.modelProvider(catalog)({ step: 0, messages: [], tools: [] });
+    expect(selected?.name).toBe("tuned");
 
     runtime.close();
     await tools.close();

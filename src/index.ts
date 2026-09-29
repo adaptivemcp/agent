@@ -22,6 +22,14 @@ export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
 export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
 export {
+  ModelCatalog,
+  loadCatalog,
+  builtinIntegrations,
+  type ModelCatalogFile,
+  type ModelIntegration,
+  type ModelProviderKind,
+} from "./models/catalog.js";
+export {
   parseServer,
   parseServers,
   providerConfigFromEnv,
@@ -41,6 +49,8 @@ export type {
   ChatUsage,
   DecodingProvider,
   DecodingRequest,
+  ModelSelectionRequest,
+  ModelSelector,
   ToolCall,
   ToolExecutionResult,
   ToolSpec,

@@ -56,7 +56,9 @@ The agent is three seams plus a loop (`src/`):
 
 `runAgent` (`src/agent/loop.ts`) is the tool-calling loop: ask the model for one
 step, execute any tool calls through the executor, append the results, repeat
-until no tool calls or `maxSteps`.
+until no tool calls or `maxSteps`. Each step's model can be chosen by
+`selectModel` (Adaptive MCP routing via `AgentRuntime.modelProvider`) from the
+`src/models/` catalog; `--model <id>` pins one.
 
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
@@ -70,6 +72,9 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `suggestDecoding(tool, capabilities, { intent })` — advisory decoding profile.
 - `decodingProvider(capabilities, { tool, intent })` — a `DecodingProvider` for
   `runAgent` that applies the strongest learned decoding profile to each step.
+- `suggestModel(tool, { server })` — the `Router`'s learned model id for a tool.
+- `modelProvider(catalog, { tool, server })` — a `ModelSelector` for `runAgent`
+  that routes each step to the learned model (or the catalog default).
 
 ## Golden rules
 
@@ -100,8 +105,9 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 
 - Interactive streaming REPL (`src/repl.ts`) + one-shot CLI, both streaming; a
   full-screen TUI is next.
-- Decoding recommendations are applied per step via `decodingProvider`; routing
-  recommendations are surfaced but not yet auto-applied.
+- Decoding and model routing are applied per step (`decodingProvider`,
+  `modelProvider`); model selection needs enough per-tool signal
+  (`--router-min-invocations`, default 10).
 - A step's tool calls share one `agent_turn_<n>` execution-graph root
   (`AgentRuntime.runTurn`); deeper per-turn action nesting is future work.
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.

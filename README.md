@@ -58,6 +58,46 @@ generated; tool calls and results print underneath. Commands: `/tools`,
 `/graph` (the per-turn execution DAG), `/metadata`, `/decoding <tool>`,
 `/reset`, `/exit`.
 
+## Models
+
+The agent has a **catalog of model integrations**. Adaptive MCP picks which one
+serves each turn from the `Router`'s learned per-tool recommendation — the
+cheapest model for fast tools, the lowest-latency one for slow tools — falling
+back to a default until there is enough signal.
+
+Built-in integrations (only those whose key is set become active):
+
+| id | provider | default model | key |
+| --- | --- | --- | --- |
+| `local` | OpenAI-compatible (llama.cpp) | `Qwen/Qwen3-8B` | `LLAMA_API_KEY` / `AI_API_KEY` |
+| `openai` | OpenAI-compatible | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `anthropic` | Anthropic | `claude-3-5-haiku-latest` | `ANTHROPIC_API_KEY` |
+| `google` | Google | `gemini-2.0-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` |
+
+- `--model <id>` pins one catalog model (turns adaptive selection off).
+- `/models` lists the active integrations; the REPL prefixes each turn with the
+  model being used, e.g. `[local]`.
+- `--models <file>` (or `$AGENT_MODELS`) adds or overrides integrations:
+
+```json
+{
+  "default": "local-cheap",
+  "models": [
+    { "id": "local-cheap", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
+      "baseURL": "http://127.0.0.1:8079/v1", "apiKeyEnv": "LLAMA_API_KEY",
+      "costWeight": 1, "latencyWeight": 1, "default": true },
+    { "id": "local-fast", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
+      "baseURL": "http://127.0.0.1:8079/v1", "apiKeyEnv": "LLAMA_API_KEY",
+      "costWeight": 2, "latencyWeight": 0.5 }
+  ]
+}
+```
+
+`costWeight`/`latencyWeight` feed the Router (lower latency weight = faster).
+Selection starts after `--router-min-invocations` (default 10) observations per
+tool, so it needs either a few runs against a persistent `--db` or a lower
+threshold for demos.
+
 ### Against your own endpoint and servers
 
 ```bash

@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatModel,
   DecodingProvider,
+  ModelSelector,
   ToolSpec,
 } from "./types.js";
 
@@ -14,6 +15,7 @@ export interface ReplOptions {
   tools: ToolSpec[];
   executor: AgentExecutor;
   decoding?: DecodingProvider;
+  selectModel?: ModelSelector;
   system?: string;
   maxSteps?: number;
   stream?: boolean;
@@ -23,6 +25,8 @@ export interface ReplOptions {
   decodingFor?: (toolName: string) => string | undefined;
   /** Text for `/graph` (the session's execution-graph tree). */
   graph?: () => string;
+  /** Text for `/models` (the model catalog). */
+  models?: () => string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
 }
@@ -53,10 +57,11 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /graph, /metadata, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /decoding <tool>, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
+  let lastModel: string | undefined;
   const ensureNewline = (): void => {
     if (!lineStart) {
       output.write("\n");
@@ -72,6 +77,12 @@ export async function runRepl(options: ReplOptions): Promise<void> {
       case "assistant_text":
         ensureNewline();
         output.write(`${event.text}\n`);
+        break;
+      case "model_selected":
+        if (event.model !== lastModel) {
+          lastModel = event.model;
+          output.write(color.dim(`[${event.model}] `));
+        }
         break;
       case "tool_call":
         ensureNewline();
@@ -116,6 +127,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             output.write(
               "commands:\n" +
                 "  /tools              list discovered tools\n" +
+                "  /models             list model integrations (Adaptive MCP picks per tool)\n" +
                 "  /graph              show this session's execution-graph DAG\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
@@ -128,6 +140,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
               output.write(`  ${tool.name}${tool.serverName ? color.dim(` [${tool.serverName}]`) : ""}\n`);
               if (tool.description) output.write(color.dim(`    ${preview(tool.description, 160)}\n`));
             }
+            continue;
+          case "/models":
+            output.write(options.models ? `${options.models()}\n` : color.dim("(no model catalog)\n"));
             continue;
           case "/graph":
             output.write(options.graph ? `${options.graph()}\n` : color.dim("(no graph view)\n"));
@@ -154,6 +169,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
       }
 
       const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
+      lastModel = undefined;
       output.write(color.dim("agent> "));
       lineStart = false;
       try {
@@ -164,6 +180,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           messages: next,
           maxSteps: options.maxSteps,
           decoding: options.decoding,
+          selectModel: options.selectModel,
           stream: options.stream,
           onEvent: render,
         });

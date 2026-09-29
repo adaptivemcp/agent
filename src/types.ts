@@ -110,6 +110,22 @@ export type DecodingProvider = (
   request: DecodingRequest,
 ) => ChatParams | undefined | Promise<ChatParams | undefined>;
 
+/** Context handed to a `ModelSelector` before each completion. */
+export interface ModelSelectionRequest {
+  step: number;
+  messages: ChatMessage[];
+  tools: ToolSpec[];
+}
+
+/**
+ * Chooses which `ChatModel` handles the next completion (e.g. an Adaptive MCP
+ * routing recommendation per tool). Returning `undefined` keeps the loop's
+ * default model.
+ */
+export type ModelSelector = (
+  request: ModelSelectionRequest,
+) => ChatModel | undefined | Promise<ChatModel | undefined>;
+
 export interface ToolExecutionResult {
   ok: boolean;
   output?: unknown;
@@ -138,6 +154,7 @@ export interface AgentRunResult {
 export type AgentEvent =
   | { type: "text_delta"; text: string; step: number }
   | { type: "assistant_text"; text: string; step: number }
+  | { type: "model_selected"; model: string; step: number }
   | { type: "decoding_applied"; params: ChatParams; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
   | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };

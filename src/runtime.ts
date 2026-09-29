@@ -6,10 +6,21 @@ import {
   DecodingAdvisor,
   DecodingResolver,
   toDecodingRecommendation,
+  type BudgetPolicy,
   type DecodingProfileId,
+  type ModelOption,
 } from "@adaptivemcp/routing";
 import type { DecodingRecommendation, ModelCapabilities, ToolRecord } from "@adaptivemcp/spec";
-import type { AgentExecutor, ChatParams, DecodingProvider, ToolCall, ToolExecutionResult, ToolSpec } from "./types.js";
+import type {
+  AgentExecutor,
+  ChatParams,
+  DecodingProvider,
+  ModelSelector,
+  ToolCall,
+  ToolExecutionResult,
+  ToolSpec,
+} from "./types.js";
+import type { ModelCatalog } from "./models/catalog.js";
 import type { McpToolResult } from "./mcp/toolset.js";
 
 /** Performs the raw MCP tool call (transport lives behind this seam). */
@@ -27,6 +38,16 @@ export interface AgentRuntimeOptions {
   workflowId?: string;
   /** Performs the actual MCP call. */
   invoke: ToolInvoker;
+  /**
+   * Candidate models for Adaptive MCP routing. Pass
+   * `ModelCatalog.routingOptions()` so `model` recommendations reference the
+   * models the agent can actually run.
+   */
+  routerModels?: ModelOption[];
+  /** Per-tool / per-server cost budgets for the router. */
+  routerBudget?: BudgetPolicy;
+  /** Minimum invocations before the router trusts observed stats. */
+  routerMinInvocations?: number;
 }
 
 /**
@@ -51,6 +72,9 @@ export class AgentRuntime implements AgentExecutor {
       yamlPath: options.yamlPath,
       middleware: options.middleware,
       enableGraph: true,
+      routerModels: options.routerModels,
+      routerBudget: options.routerBudget,
+      routerMinInvocations: options.routerMinInvocations,
     });
     this.graphTracking = new GraphTrackingMiddleware(this.adaptive.memory, {
       sessionId: options.sessionId,
@@ -194,6 +218,44 @@ export class AgentRuntime implements AgentExecutor {
         intent: options.intent,
       });
       return recommendation ? toChatParams(recommendation) : undefined;
+    };
+  }
+
+  /**
+   * Adaptive MCP's recommended model id for a tool, from the `Router`'s learned
+   * `model` recommendation. Re-runs the router for this tool first so the answer
+   * reflects the latest stats; returns `undefined` when there is not enough
+   * signal (the caller falls back to a default).
+   */
+  suggestModel(toolName: string, options: { serverName?: string } = {}): string | undefined {
+    this.adaptive.router.routeTool(toolName, options.serverName);
+    const payload = this.adaptive.memory
+      .getTool(toolName, options.serverName)
+      ?.recommendations.find((recommendation) => recommendation.type === "model")?.payload;
+    if (payload && typeof payload === "object" && "model" in payload) {
+      const model = (payload as { model?: unknown }).model;
+      return typeof model === "string" ? model : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Build a `ModelSelector` for `runAgent`: each step, Adaptive MCP picks the
+   * model it has learned suits the governing tool (highest observed failure
+   * rate, or a named tool). Returns `undefined` when nothing is learned yet, so
+   * the loop keeps its default model.
+   */
+  modelProvider(
+    catalog: ModelCatalog,
+    options: { toolName?: string; serverName?: string } = {},
+  ): ModelSelector {
+    return () => {
+      const target = options.toolName
+        ? { toolName: options.toolName, serverName: options.serverName }
+        : this.mostSignificantTool();
+      if (!target) return undefined;
+      const id = this.suggestModel(target.toolName, { serverName: target.serverName });
+      return id ? catalog.get(id) : undefined;
     };
   }
 
