@@ -82,6 +82,7 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   the server's `dev.adaptivemcp/tools-metadata` policy as a floor.
 - `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.
 - `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
+- `decodingReport()` — per-group applied-decoding telemetry (`DecodingAnalyzer`).
 - `learnedProcedure()` — a repeated tool sequence for this workflow (planning).
 - `graphSignals()` / `review()` — graph-aware guardrails injected per step.
 - `onExecuted` option — report observations to governing servers.

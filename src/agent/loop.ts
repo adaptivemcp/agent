@@ -90,6 +90,19 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
     }
     const perCallCost =
       cost !== undefined && chat.toolCalls.length > 0 ? cost / chat.toolCalls.length : undefined;
+    const perCallUsage =
+      chat.usage && chat.toolCalls.length > 0
+        ? {
+            inputTokens:
+              chat.usage.inputTokens !== undefined
+                ? Math.round(chat.usage.inputTokens / chat.toolCalls.length)
+                : undefined,
+            outputTokens:
+              chat.usage.outputTokens !== undefined
+                ? Math.round(chat.usage.outputTokens / chat.toolCalls.length)
+                : undefined,
+          }
+        : undefined;
 
     if (chat.toolCalls.length === 0) {
       if (chat.text) messages.push({ role: "assistant", content: chat.text });
@@ -109,6 +122,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
           ? await options.executor.execute(call, spec, {
               model: activeModel.name,
               cost: perCallCost !== undefined ? { amount: perCallCost, currency: "USD" } : undefined,
+              usage: perCallUsage,
             })
           : { ok: false, error: `unknown tool: ${call.name}` };
         emit({ type: "tool_result", call, result, step });

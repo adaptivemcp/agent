@@ -40,8 +40,10 @@ export interface ReplOptions {
   historyPath?: string;
   /** Text for `/metadata` (e.g. the derived tools-metadata view). */
   metadata?: () => string;
-  /** Text for `/decoding <tool>` (a decoding recommendation, if any). */
+  /** Text for `/decoding <tool>`. */
   decodingFor?: (toolName: string) => string | undefined;
+  /** Text for `/decoding-report` (accumulated decoding telemetry). */
+  decodingReport?: () => string;
   /** Text for `/graph` (the session's execution-graph tree). */
   graph?: () => string;
   /** Text for `/models` (the model catalog). */
@@ -95,7 +97,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /retrieve <hash>, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /retrieve <hash>, /decoding <tool>, /decoding-report, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -194,6 +196,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /policy             show the server-governed policy in effect\n" +
                 "  /retrieve [hash]     fetch a compressed tool output's original (default: last)\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
+                "  /decoding-report    summarized applied-decoding telemetry\n" +
                 "  /reset              clear the conversation\n" +
                 "  /exit               quit\n",
             );
@@ -234,6 +237,11 @@ export async function runRepl(options: ReplOptions): Promise<void> {
               const suggestion = options.decodingFor?.(arg);
               output.write(suggestion ? `${suggestion}\n` : color.dim(`(no recommendation for ${arg} yet)\n`));
             }
+            continue;
+          case "/decoding-report":
+            output.write(
+              options.decodingReport ? `${options.decodingReport()}\n` : color.dim("(no decoding telemetry)\n"),
+            );
             continue;
           case "/reset":
             messages = [{ role: "system", content: baseSystem }];

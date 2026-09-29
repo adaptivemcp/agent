@@ -56,7 +56,7 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
 `/models`, `/graph` (the per-turn execution DAG), `/metadata`, `/cost`,
-`/retrieve [hash]`, `/decoding <tool>`, `/reset`, `/exit`.
+`/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`, `/reset`, `/exit`.
 
 - **Approvals.** Tools the gate marks `require_confirmation` — high-risk from the
   server's standard MCP annotations, or learned-flaky — prompt
@@ -66,6 +66,9 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   disclosure of evaluation output); `--no-context` disables it.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
+- **Decoding telemetry.** The decoding applied per step is recorded on each tool
+  execution (`ToolDecoding` + token usage); `/decoding-report` summarizes it by
+  `(tool, profile, model)` via `DecodingAnalyzer` (`@adaptivemcp/routing`).
 - **Compression.** `--compress` routes large tool output through the headroom MCP
   server (`HeadroomMiddleware`); `/retrieve` fetches the original by hash.
 - **Persistence.** `--history <file>` restores and saves the conversation as

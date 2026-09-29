@@ -100,7 +100,10 @@ recommendation's `resolved` knobs onto `ChatParams` — which is exactly the set
 the backend advertises through `ChatModel.capabilities` (`AiSdkModel` defaults to
 `OPENAI_CAPABILITIES`). Each applied step is reported as a `decoding_applied`
 event, so the adaptation is observable. This is what "the agent owns its LLM call"
-buys: a recommendation that a provider-hosted runner could not apply.
+buys: a recommendation that a provider-hosted runner could not apply. The
+resolved decoding + token usage are also recorded per tool execution
+(`ToolExecutionEvent.decoding`/`usage`), and `AgentRuntime.decodingReport()`
+summarizes them via `DecodingAnalyzer` (ROADMAP 8d/8e).
 
 ## Model catalog & routing
 

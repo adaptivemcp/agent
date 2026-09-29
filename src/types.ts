@@ -150,6 +150,8 @@ export interface ExecutionContext {
   model?: string;
   /** The tool call's share of the step's model cost. */
   cost?: { amount: number; currency?: string };
+  /** The tool call's share of the step's token usage. */
+  usage?: ChatUsage;
 }
 
 export interface AgentExecutor {

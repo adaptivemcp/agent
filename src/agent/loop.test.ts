@@ -265,7 +265,12 @@ describe("agent loop", () => {
       await runtime.execute({ id: `c${i}`, name: "deploy_service", input: {} }, spec);
     }
 
-    const model = new RecordingModel(new ScriptedModel([{ text: "done" }]));
+    const model = new RecordingModel(
+      new ScriptedModel([
+        { toolCalls: [{ name: "deploy_service", input: {} }] },
+        { text: "done" },
+      ]),
+    );
     const events: AgentEvent[] = [];
     await runAgent({
       model,
@@ -279,6 +284,15 @@ describe("agent loop", () => {
     expect(events.some((event) => event.type === "decoding_applied")).toBe(true);
     expect(model.params[0]?.temperature).toBe(0.2);
     expect(model.params[0]?.topK).toBe(20);
+
+    // ROADMAP 8d: the applied decoding is recorded on the tool execution event.
+    const recorded = runtime.adaptive.telemetry
+      .getStore()
+      .all()
+      .find((event) => event.decoding !== undefined);
+    expect(recorded?.decoding?.profile).toBe("deterministic");
+    expect(recorded?.decoding?.resolverVersion).toBe("1.0.0");
+    expect(runtime.decodingReport({ minSamples: 1 })).toContain("deterministic");
 
     runtime.close();
     await tools.close();

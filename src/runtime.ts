@@ -7,6 +7,7 @@ import type { Middleware } from "@adaptivemcp/middleware";
 import type { ApprovalPolicy } from "@adaptivemcp/approval";
 import {
   DecodingAdvisor,
+  DecodingAnalyzer,
   DecodingResolver,
   toDecodingRecommendation,
   type BudgetPolicy,
@@ -18,6 +19,7 @@ import type {
   DecodingRecommendation,
   ModelCapabilities,
   RiskLevel,
+  ToolDecoding,
   ToolRecord,
 } from "@adaptivemcp/spec";
 import type {
@@ -109,6 +111,7 @@ export class AgentRuntime implements AgentExecutor {
   private readonly onExecuted?: (observation: ExecutionObservation) => void;
   private readonly warnedSignals = new Set<string>();
   private readonly serverBudgets = new Map<string, number>();
+  private lastDecoding?: ToolDecoding;
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
@@ -174,6 +177,8 @@ export class AgentRuntime implements AgentExecutor {
       status: recorded.ok ? "completed" : "failed",
       model: context?.model,
       cost: context?.cost,
+      decoding: this.lastDecoding,
+      usage: context?.usage,
       output: recorded.output,
       error: recorded.error ? { message: recorded.error } : undefined,
     });
@@ -431,6 +436,31 @@ export class AgentRuntime implements AgentExecutor {
     return view["headroom"]?.hash;
   }
 
+  /**
+   * Pure, computed-on-read decoding report over accumulated telemetry
+   * (ROADMAP 8e), grouped by (tool, profile, model, resolverVersion).
+   */
+  decodingReport(options: { minSamples?: number } = {}): string {
+    const groups = new DecodingAnalyzer({ minSamples: options.minSamples ?? 5 }).analyze(
+      this.adaptive.telemetry.getStore().all(),
+    );
+    if (groups.length === 0) return "(no decoding telemetry yet)";
+    return groups
+      .map((group) => {
+        const model = group.model ? ` @${group.model}` : "";
+        const tokens =
+          group.avgInputTokens || group.avgOutputTokens
+            ? `, ~${group.avgInputTokens}/${group.avgOutputTokens} tok`
+            : "";
+        return (
+          `  ${group.toolName}${model} [${group.profile} → ${group.suggestedProfile}] ` +
+          `${group.invocations} calls, ${Math.round(group.failureRate * 100)}% failed, ` +
+          `avg ${group.avgDurationMs}ms${tokens}`
+        );
+      })
+      .join("\n");
+  }
+
   /** Recorded cost per tool (from the store) for the `/cost` command. */
   costSummary(): string {
     const records = this.adaptive.memory
@@ -489,6 +519,15 @@ export class AgentRuntime implements AgentExecutor {
         serverName: target.serverName,
         intent: options.intent,
       });
+      // Remember what we applied so the telemetry recorded for this step's tool
+      // calls carries the resolved decoding (ROADMAP 8d).
+      this.lastDecoding = recommendation
+        ? {
+            profile: recommendation.profile.id,
+            resolverVersion: recommendation.resolverVersion,
+            resolved: recommendation.resolved,
+          }
+        : undefined;
       return recommendation ? toChatParams(recommendation) : undefined;
     };
   }

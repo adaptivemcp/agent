@@ -396,6 +396,7 @@ async function main(): Promise<void> {
           });
           return recommendation ? JSON.stringify(recommendation, null, 2) : undefined;
         },
+        decodingReport: () => runtime.decodingReport(),
       });
       runtime.close();
       return;
