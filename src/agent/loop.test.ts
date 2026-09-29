@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
+import type { Middleware } from "@adaptivemcp/middleware";
 import { InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
@@ -559,6 +560,29 @@ describe("agent loop", () => {
     const result = await runtime.execute({ id: "c", name: "danger", input: {} }, specs[0]!);
     expect(result.ok).toBe(true);
     expect(asked).toBe(1);
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("runs middleware around tool execution", async () => {
+    const tools = new InMemoryToolset("demo", [{ name: "echo", handler: () => "hello" }]);
+    const specs = await tools.listTools();
+    const upper: Middleware = {
+      name: "upper",
+      async afterCall(_result, call) {
+        if (typeof call.output === "string") call.output = call.output.toUpperCase();
+      },
+    };
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s18",
+      invoke: (name, input) => tools.callTool(name, input),
+      middleware: [upper],
+    });
+
+    const result = await runtime.execute({ id: "c", name: "echo", input: {} }, specs[0]!);
+    expect(result.output).toBe("HELLO");
 
     runtime.close();
     await tools.close();

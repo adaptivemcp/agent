@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { runAgent } from "./agent/loop.js";
 import type {
   AgentEvent,
@@ -31,6 +32,10 @@ export interface ReplOptions {
   context?: () => string;
   /** Text for `/cost`. */
   cost?: () => string;
+  /** Retrieve a compressed tool output's original by hash (`/retrieve <hash>`). */
+  retrieve?: (hash: string) => Promise<string>;
+  /** JSON file to persist/restore the conversation across runs. */
+  historyPath?: string;
   /** Text for `/metadata` (e.g. the derived tools-metadata view). */
   metadata?: () => string;
   /** Text for `/decoding <tool>` (a decoding recommendation, if any). */
@@ -59,6 +64,25 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   const baseSystem = options.system ?? DEFAULT_SYSTEM;
   let messages: ChatMessage[] = [{ role: "system", content: baseSystem }];
 
+  // Restore a previous conversation, if any, so sessions persist across runs.
+  if (options.historyPath && existsSync(options.historyPath)) {
+    try {
+      const saved = JSON.parse(readFileSync(options.historyPath, "utf8")) as ChatMessage[];
+      if (Array.isArray(saved) && saved.length > 0) messages = saved;
+    } catch {
+      // Ignore an unreadable/corrupt history file.
+    }
+  }
+  if (messages[0]?.role !== "system") messages.unshift({ role: "system", content: baseSystem });
+  const persistHistory = (): void => {
+    if (!options.historyPath) return;
+    try {
+      writeFileSync(options.historyPath, JSON.stringify(messages, null, 2));
+    } catch {
+      // History persistence is best-effort.
+    }
+  };
+
   const rl = createInterface({
     input,
     output,
@@ -69,7 +93,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /retrieve <hash>, /decoding <tool>, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -161,6 +185,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /graph              show this session's execution-graph DAG\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /cost               show recorded cost per tool\n" +
+                "  /retrieve [hash]     fetch a compressed tool output's original (default: last)\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /reset              clear the conversation\n" +
                 "  /exit               quit\n",
@@ -184,6 +209,14 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           case "/cost":
             output.write(options.cost ? `${options.cost()}\n` : color.dim("(no cost data)\n"));
             continue;
+          case "/retrieve":
+            if (!options.retrieve) {
+              output.write(color.dim("(compression is not enabled)\n"));
+            } else {
+              ensureNewline();
+              output.write(`${await options.retrieve(arg)}\n`);
+            }
+            continue;
           case "/decoding":
             if (!arg) {
               output.write(color.dim("usage: /decoding <tool>\n"));
@@ -194,6 +227,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/reset":
             messages = [{ role: "system", content: baseSystem }];
+            persistHistory();
             output.write(color.dim("(conversation reset)\n"));
             continue;
           default:
@@ -228,6 +262,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
         });
         messages = result.messages;
         ensureNewline();
+        persistHistory();
       } catch (error) {
         ensureNewline();
         output.write(color.red(`error: ${error instanceof Error ? error.message : String(error)}\n`));

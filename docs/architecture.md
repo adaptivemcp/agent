@@ -130,6 +130,10 @@ disables selection.
 - **Cost.** The loop prices each step's tokens via `ChatModel.pricing`, splits it
   across the step's tool calls, and records it via `observeCompleted`, so
   routing/budget insights see real cost.
+- **Context management.** Tool output can be compressed through the headroom MCP
+  server via `HeadroomMiddleware` (`--compress`), with originals retrievable by
+  hash (`/retrieve`); `--history` persists the conversation and `--session` keeps
+  the graph/stats session stable.
 
 ## Decisions (2026-09-28)
 

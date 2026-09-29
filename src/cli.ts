@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { AggregateToolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
+import {
+  HeadroomMiddleware,
+  McpHeadroomCompressor,
+  type McpCallClient,
+  type Middleware,
+} from "@adaptivemcp/middleware";
 import { AgentRuntime } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
@@ -22,6 +28,9 @@ interface CliArgs {
   yaml?: string;
   maxSteps?: number;
   routerMinInvocations?: number;
+  session?: string;
+  history?: string;
+  compress: boolean;
   listTools: boolean;
   interactive: boolean;
   noStream: boolean;
@@ -39,6 +48,7 @@ function parseArgs(argv: string[]): CliArgs {
     noStream: false,
     autoApprove: false,
     context: true,
+    compress: false,
     verbose: false,
     help: false,
   };
@@ -80,6 +90,15 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--router-min-invocations":
         args.routerMinInvocations = Number(next());
+        break;
+      case "--session":
+        args.session = next();
+        break;
+      case "--history":
+        args.history = next();
+        break;
+      case "--compress":
+        args.compress = true;
         break;
       case "--list-tools":
         args.listTools = true;
@@ -141,6 +160,9 @@ Options:
   --yaml <path>                 Write the derived tools-metadata view here
   --max-steps <n>               Max agent steps per turn (default: 8)
   --router-min-invocations <n>  Invocations before the router trusts stats (default: 10)
+  --session <id>                Stable session id (accumulate graph/stats across runs)
+  --history <file>              Persist/restore the conversation (JSON)
+  --compress                    Compress large tool output via the headroom MCP server
   --list-tools                  List discovered tools and exit
   -h, --help                    Show this help
 `);
@@ -201,6 +223,32 @@ async function main(): Promise<void> {
   const toolsets = serverSpecs.map((options) => new StdioToolset(options.serverName, options));
   const tools = new AggregateToolset(toolsets);
 
+  // Optional output compression via the headroom MCP server.
+  const middleware: Middleware[] = [];
+  let headroom: StdioToolset | undefined;
+  if (args.compress) {
+    headroom = new StdioToolset("headroom", {
+      serverName: "headroom",
+      command: "headroom",
+      args: ["mcp", "serve"],
+    });
+    const client: McpCallClient = {
+      async callTool({ name, arguments: input }) {
+        const result = await headroom!.callTool(name, input);
+        if (!result.ok) throw new Error(result.error ?? `headroom ${name} failed`);
+        return {
+          content: [
+            {
+              type: "text",
+              text: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+            },
+          ],
+        };
+      },
+    };
+    middleware.push(new HeadroomMiddleware({ compressor: new McpHeadroomCompressor(client) }));
+  }
+
   try {
     const specs = await tools.listTools();
     if (args.listTools) {
@@ -213,8 +261,9 @@ async function main(): Promise<void> {
     const runtime = new AgentRuntime({
       dbPath: args.db,
       yamlPath: args.yaml,
-      sessionId: `cli-${Date.now()}`,
+      sessionId: args.session ?? `cli-${Date.now()}`,
       invoke: (name, input) => tools.callTool(name, input),
+      middleware,
       routerModels: catalog.routingOptions(),
       routerMinInvocations: args.routerMinInvocations,
     });
@@ -241,6 +290,15 @@ async function main(): Promise<void> {
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
         cost: () => runtime.costSummary(),
+        historyPath: args.history,
+        retrieve: headroom
+          ? async (hash) => {
+              const resolved = hash && hash !== "last" ? hash : runtime.lastCompressionHash();
+              if (!resolved) return "(no compressed output yet)";
+              const result = await headroom!.callTool("headroom_retrieve", { hash: resolved });
+              return result.ok ? stringify(result.output) : `error: ${result.error}`;
+            }
+          : undefined,
         metadata: () => runtime.toolsMetadata(),
         graph: () => runtime.graphView(),
         models: () => catalog.describe(),
@@ -280,6 +338,7 @@ async function main(): Promise<void> {
     runtime.close();
   } finally {
     await tools.close();
+    await headroom?.close();
   }
 }
 

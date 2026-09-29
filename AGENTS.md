@@ -34,6 +34,7 @@ pnpm format        # prettier --write
 pnpm demo          # offline vertical slice: loop -> telemetry -> derived view
 pnpm dev           # interactive REPL (streaming, multi-turn)
 pnpm dev -- --prompt "..." --server "fs=npx ..."   # one-shot
+pnpm dev -- --compress --history /tmp/agent-history.json --session dev
 pnpm dev -- --help # CLI (tsx)
 ```
 

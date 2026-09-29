@@ -245,6 +245,15 @@ export class AgentRuntime implements AgentExecutor {
     return parts.length > 0 ? parts.join("; ") : undefined;
   }
 
+  /** The most recent headroom compression hash, if any (for `/retrieve`). */
+  lastCompressionHash(): string | undefined {
+    const view = this.adaptive.middleware.contributeView() as Record<
+      string,
+      { hash?: string } | undefined
+    >;
+    return view["headroom"]?.hash;
+  }
+
   /** Recorded cost per tool (from the store) for the `/cost` command. */
   costSummary(): string {
     const records = this.adaptive.memory
