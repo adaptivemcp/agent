@@ -177,6 +177,7 @@ export class AgentRuntime implements AgentExecutor {
       status: recorded.ok ? "completed" : "failed",
       model: context?.model,
       cost: context?.cost,
+      attempts: outcome.attempts,
       decoding: this.lastDecoding,
       usage: context?.usage,
       output: recorded.output,
