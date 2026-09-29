@@ -72,6 +72,10 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   JSON; `--session <id>` keeps the graph/stats session stable across runs.
 - **Reporting.** `--report` sends each tool observation back to servers that
   expose the `report_observation` tool (the spec-legal client→server channel).
+- **Server-governed policy.** Each server's `dev.adaptivemcp/tools-metadata`
+  resource is read at startup and applied as a floor: static `owner`/`risk`/
+  `description`, `require_approval`, and per-tool budgets (`/policy` shows what
+  is in effect; `--no-server-policy` disables).
 - **Guardrails & planning.** `--workflow <id>` enables cross-session
   graph/pattern learning: the learned context can include an observed tool
   procedure, and new failure-cascade/anomaly signals are injected into the

@@ -141,6 +141,10 @@ disables selection.
 - **Reporting.** `AgentRuntime`'s `onExecuted` hook lets the host report each
   observation to servers exposing `report_observation` (`--report`), closing the
   client→server loop.
+- **Server governance.** `StdioToolset` advertises the extension and reads
+  `dev.adaptivemcp://tools-metadata`; `AgentRuntime.applyServerMetadata` applies
+  the published annotation/`require_approval`/budget as a floor (never overriding
+  a human or learned value). `/policy` shows what is in effect.
 
 ## Decisions (2026-09-28)
 

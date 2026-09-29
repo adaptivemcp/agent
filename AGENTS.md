@@ -78,6 +78,8 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   that routes each step to the learned model (or the catalog default).
 - `seedToolAnnotations(specs)` — seed static risk from standard MCP tool
   annotations so the gate can prompt before learning.
+- `applyServerMetadata(doc, {server})` / `serverPolicySummary()` — read and apply
+  the server's `dev.adaptivemcp/tools-metadata` policy as a floor.
 - `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.
 - `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
 - `learnedProcedure()` — a repeated tool sequence for this workflow (planning).

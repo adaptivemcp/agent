@@ -13,7 +13,13 @@ import {
   type DecodingProfileId,
   type ModelOption,
 } from "@adaptivemcp/routing";
-import type { DecodingRecommendation, ModelCapabilities, ToolRecord } from "@adaptivemcp/spec";
+import type {
+  Annotation,
+  DecodingRecommendation,
+  ModelCapabilities,
+  RiskLevel,
+  ToolRecord,
+} from "@adaptivemcp/spec";
 import type {
   AgentExecutor,
   ChatParams,
@@ -38,6 +44,25 @@ export interface ExecutionObservation {
   durationMs: number;
   model?: string;
   cost?: { amount: number; currency?: string };
+}
+
+/** One tool's server-published policy (subset of the tools-metadata view). */
+export interface ServerToolPolicy {
+  name: string;
+  annotation?: {
+    risk?: string;
+    owner?: string;
+    tags?: string[];
+    description?: string;
+    require_approval?: boolean;
+    budget?: { limit: number; currency: string };
+  };
+  recommendations?: Array<{ type: string; payload?: unknown; rationale?: string }>;
+}
+
+/** The server-published `dev.adaptivemcp/tools-metadata` document. */
+export interface ServerToolsMetadata {
+  tools?: ServerToolPolicy[];
 }
 
 export interface AgentRuntimeOptions {
@@ -83,6 +108,7 @@ export class AgentRuntime implements AgentExecutor {
   private approver: (toolName: string) => boolean | Promise<boolean>;
   private readonly onExecuted?: (observation: ExecutionObservation) => void;
   private readonly warnedSignals = new Set<string>();
+  private readonly serverBudgets = new Map<string, number>();
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
@@ -186,6 +212,70 @@ export class AgentRuntime implements AgentExecutor {
       if (this.adaptive.memory.getTool(spec.name, spec.serverName)?.annotation.risk) continue;
       this.adaptive.memory.setAnnotation({ toolName: spec.name, serverName: spec.serverName, risk });
     }
+  }
+
+  /**
+   * Apply a server-governed `dev.adaptivemcp/tools-metadata` document: seed the
+   * store's static annotation (risk/owner/tags/description) where absent, treat
+   * `require_approval` as high risk (so the gate requires confirmation), and
+   * remember per-tool budgets. Server policy is a floor — an existing (human or
+   * learned) value is never overwritten.
+   */
+  applyServerMetadata(
+    doc: ServerToolsMetadata,
+    options: { serverName?: string } = {},
+  ): { annotations: number; approvals: number; budgets: number } {
+    const applied = { annotations: 0, approvals: 0, budgets: 0 };
+    for (const tool of doc.tools ?? []) {
+      const existing = this.adaptive.memory.getTool(tool.name, options.serverName);
+      const requireApproval = tool.annotation?.require_approval === true;
+      const risk =
+        (tool.annotation?.risk as RiskLevel | undefined) ?? (requireApproval ? "high" : undefined);
+
+      const patch: Annotation = { toolName: tool.name, serverName: options.serverName };
+      let changed = false;
+      if (risk && !existing?.annotation.risk) {
+        patch.risk = risk;
+        changed = true;
+      }
+      if (tool.annotation?.owner && !existing?.annotation.owner) {
+        patch.owner = tool.annotation.owner;
+        changed = true;
+      }
+      if (tool.annotation?.tags && !existing?.annotation.tags) {
+        patch.tags = tool.annotation.tags;
+        changed = true;
+      }
+      if (tool.annotation?.description && !existing?.annotation.description) {
+        patch.description = tool.annotation.description;
+        changed = true;
+      }
+      if (changed) {
+        this.adaptive.memory.setAnnotation(patch);
+        applied.annotations += 1;
+      }
+      if (requireApproval) applied.approvals += 1;
+      if (tool.annotation?.budget) {
+        this.serverBudgets.set(tool.name, tool.annotation.budget.limit);
+        applied.budgets += 1;
+      }
+    }
+    return applied;
+  }
+
+  /** The server-governed policy currently in effect (for `/policy`). */
+  serverPolicySummary(): string {
+    const lines: string[] = [];
+    for (const record of this.adaptive.memory.allTools()) {
+      const parts: string[] = [];
+      if (record.annotation.owner) parts.push(`owner ${record.annotation.owner}`);
+      if (record.annotation.risk) parts.push(`risk ${record.annotation.risk}`);
+      if (record.annotation.tags?.length) parts.push(`tags ${record.annotation.tags.join(",")}`);
+      const limit = this.serverBudgets.get(record.toolName);
+      if (limit !== undefined) parts.push(`budget ${limit}`);
+      if (parts.length > 0) lines.push(`  ${record.toolName}: ${parts.join(", ")}`);
+    }
+    return lines.length > 0 ? lines.join("\n") : "(no server policy applied)";
   }
 
   /** Run the heavier cross-tool passes (routing + orchestration). */

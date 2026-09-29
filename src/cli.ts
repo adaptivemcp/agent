@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { AggregateToolset } from "./mcp/toolset.js";
+import { AggregateToolset, sanitize } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
 import {
   HeadroomMiddleware,
@@ -7,7 +7,9 @@ import {
   type McpCallClient,
   type Middleware,
 } from "@adaptivemcp/middleware";
-import { AgentRuntime } from "./runtime.js";
+import { TOOLS_METADATA_RESOURCE_URI } from "@adaptivemcp/spec";
+import { load as parseYaml } from "js-yaml";
+import { AgentRuntime, type ServerToolsMetadata } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
 import { exampleServerOptions, parseServer } from "./config.js";
@@ -33,6 +35,7 @@ interface CliArgs {
   workflow?: string;
   compress: boolean;
   report: boolean;
+  serverPolicy: boolean;
   listTools: boolean;
   interactive: boolean;
   noStream: boolean;
@@ -52,6 +55,7 @@ function parseArgs(argv: string[]): CliArgs {
     context: true,
     compress: false,
     report: false,
+    serverPolicy: true,
     verbose: false,
     help: false,
   };
@@ -108,6 +112,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--report":
         args.report = true;
+        break;
+      case "--no-server-policy":
+        args.serverPolicy = false;
         break;
       case "--list-tools":
         args.listTools = true;
@@ -174,6 +181,7 @@ Options:
   --workflow <id>               Workflow id for cross-session graph/pattern learning
   --compress                    Compress large tool output via the headroom MCP server
   --report                      Report observations to servers exposing report_observation
+  --no-server-policy            Don't read/apply the server's tools-metadata policy
   --list-tools                  List discovered tools and exit
   -h, --help                    Show this help
 `);
@@ -309,6 +317,46 @@ async function main(): Promise<void> {
     // Seed risk from standard MCP annotations so approvals can act immediately.
     runtime.seedToolAnnotations(specs);
 
+    // Server-governed policy: read each server's tools-metadata resource.
+    if (args.serverPolicy) {
+      for (const toolset of toolsets) {
+        let text: string | undefined;
+        try {
+          text = await toolset.readResource(TOOLS_METADATA_RESOURCE_URI);
+        } catch {
+          text = undefined;
+        }
+        if (!text) continue;
+        try {
+          const doc = parseYaml(text) as ServerToolsMetadata;
+          // The server publishes bare tool names; map them onto the agent's
+          // namespaced spec names for this server.
+          const prefix = `${sanitize(toolset.serverName)}_`;
+          const rename = new Map<string, string>();
+          for (const spec of specs) {
+            if (spec.serverName === toolset.serverName && spec.name.startsWith(prefix)) {
+              rename.set(spec.name.slice(prefix.length), spec.name);
+            }
+          }
+          const mapped: ServerToolsMetadata = {
+            tools: (doc.tools ?? []).map((tool) => ({
+              ...tool,
+              name: rename.get(tool.name) ?? tool.name,
+            })),
+          };
+          const applied = runtime.applyServerMetadata(mapped, { serverName: toolset.serverName });
+          if (args.verbose) {
+            console.log(
+              `[policy] ${toolset.serverName}: ${applied.annotations} annotations, ` +
+                `${applied.approvals} approvals, ${applied.budgets} budgets`,
+            );
+          }
+        } catch {
+          // Ignore a malformed policy document.
+        }
+      }
+    }
+
     const stream = !args.noStream;
     const maxSteps = args.maxSteps ?? 8;
     // Adaptive MCP selects the model per tool unless one was pinned.
@@ -329,6 +377,7 @@ async function main(): Promise<void> {
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
         cost: () => runtime.costSummary(),
+        policy: () => runtime.serverPolicySummary(),
         historyPath: args.history,
         retrieve: headroom
           ? async (hash) => {

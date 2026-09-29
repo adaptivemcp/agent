@@ -641,4 +641,36 @@ describe("agent loop", () => {
     runtime.close();
     await tools.close();
   });
+
+  it("applies server-published tools-metadata policy", () => {
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s21",
+      invoke: async () => ({ ok: true }),
+    });
+
+    const applied = runtime.applyServerMetadata(
+      {
+        tools: [
+          {
+            name: "x",
+            annotation: {
+              owner: "platform",
+              require_approval: true,
+              budget: { limit: 5, currency: "USD" },
+            },
+          },
+        ],
+      },
+      { serverName: "srv" },
+    );
+
+    expect(applied).toEqual({ annotations: 1, approvals: 1, budgets: 1 });
+    const record = runtime.adaptive.memory.getTool("x", "srv");
+    expect(record?.annotation.owner).toBe("platform");
+    expect(record?.annotation.risk).toBe("high");
+    expect(runtime.serverPolicySummary()).toContain("x");
+
+    runtime.close();
+  });
 });

@@ -32,6 +32,8 @@ export interface ReplOptions {
   context?: () => string;
   /** Text for `/cost`. */
   cost?: () => string;
+  /** Text for `/policy` (server-governed policy in effect). */
+  policy?: () => string;
   /** Retrieve a compressed tool output's original by hash (`/retrieve <hash>`). */
   retrieve?: (hash: string) => Promise<string>;
   /** JSON file to persist/restore the conversation across runs. */
@@ -93,7 +95,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /retrieve <hash>, /decoding <tool>, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /retrieve <hash>, /decoding <tool>, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -189,6 +191,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /graph              show this session's execution-graph DAG\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /cost               show recorded cost per tool\n" +
+                "  /policy             show the server-governed policy in effect\n" +
                 "  /retrieve [hash]     fetch a compressed tool output's original (default: last)\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /reset              clear the conversation\n" +
@@ -212,6 +215,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/cost":
             output.write(options.cost ? `${options.cost()}\n` : color.dim("(no cost data)\n"));
+            continue;
+          case "/policy":
+            output.write(options.policy ? `${options.policy()}\n` : color.dim("(no policy)\n"));
             continue;
           case "/retrieve":
             if (!options.retrieve) {

@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { TOOLS_METADATA_EXTENSION } from "@adaptivemcp/spec";
 import type { ToolSpec } from "../types.js";
 import type { McpToolResult, Toolset } from "./toolset.js";
 
@@ -37,10 +38,36 @@ export class StdioToolset implements Toolset {
       env,
       cwd: this.options.cwd,
     });
-    const client = new Client({ name: "adaptivemcp-agent", version: "0.0.1" }, { capabilities: {} });
+    const client = new Client(
+      { name: "adaptivemcp-agent", version: "0.0.1" },
+      // Advertise support for the Adaptive MCP extension (clients may declare it
+      // alongside servers; see the SEP-2133 draft).
+      { capabilities: { extensions: { [TOOLS_METADATA_EXTENSION]: {} } } },
+    );
     await client.connect(transport);
     this.client = client;
     return client;
+  }
+
+  /** List the server's resources (used to discover the tools-metadata resource). */
+  async listResources(): Promise<Array<{ uri: string; name?: string; mimeType?: string }>> {
+    const client = await this.connect();
+    const { resources } = await client.listResources();
+    return resources.map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      mimeType: resource.mimeType,
+    }));
+  }
+
+  /** Read a text resource, or `undefined` if it is missing/blob-only. */
+  async readResource(uri: string): Promise<string | undefined> {
+    const client = await this.connect();
+    const result = await client.readResource({ uri });
+    for (const content of result.contents) {
+      if ("text" in content && typeof content.text === "string") return content.text;
+    }
+    return undefined;
   }
 
   async listTools(): Promise<ToolSpec[]> {

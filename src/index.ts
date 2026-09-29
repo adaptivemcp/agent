@@ -13,6 +13,8 @@ export {
   AgentRuntime,
   type AgentRuntimeOptions,
   type ExecutionObservation,
+  type ServerToolPolicy,
+  type ServerToolsMetadata,
   type ToolInvoker,
 } from "./runtime.js";
 export {
