@@ -441,9 +441,15 @@ export class AgentRuntime implements AgentExecutor {
    * (ROADMAP 8e), grouped by (tool, profile, model, resolverVersion).
    */
   decodingReport(options: { minSamples?: number } = {}): string {
-    const groups = new DecodingAnalyzer({ minSamples: options.minSamples ?? 5 }).analyze(
-      this.adaptive.telemetry.getStore().all(),
+    const analyzer = new DecodingAnalyzer({ minSamples: options.minSamples ?? 5 });
+    // Prefer the durable metric cells; fall back to the in-process event log.
+    const cells = (this.adaptive.memory.metricCells?.() ?? []).filter(
+      (cell) => cell.dimensions.decodingProfile !== undefined,
     );
+    const groups =
+      cells.length > 0
+        ? analyzer.analyzeCells(cells)
+        : analyzer.analyze(this.adaptive.telemetry.getStore().all());
     if (groups.length === 0) return "(no decoding telemetry yet)";
     return groups
       .map((group) => {

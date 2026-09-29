@@ -103,7 +103,9 @@ event, so the adaptation is observable. This is what "the agent owns its LLM cal
 buys: a recommendation that a provider-hosted runner could not apply. The
 resolved decoding + token usage are also recorded per tool execution
 (`ToolExecutionEvent.decoding`/`usage`), and `AgentRuntime.decodingReport()`
-summarizes them via `DecodingAnalyzer` (ROADMAP 8d/8e).
+summarizes them via `DecodingAnalyzer` — from the store's durable
+`metric_cells` rollup when available, else the in-process event log (ROADMAP
+8d/8e).
 
 ## Model catalog & routing
 
