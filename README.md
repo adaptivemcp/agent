@@ -48,7 +48,7 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 
 | Setting | Default |
 | --- | --- |
-| Model endpoint | `http://127.0.0.1:8079/v1` (a local `llama-server`) |
+| Model endpoint | `http://127.0.0.1:9931/v1` (a local `llama-server`) |
 | API key | `$AI_API_KEY`, else `$LLAMA_API_KEY` |
 | Model id | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field) |
 | MCP server | the sibling `adaptive-mcp` example server (`examples/dist/server.js`) |
@@ -111,10 +111,10 @@ Built-in integrations (only those whose key is set become active):
   "default": "local-cheap",
   "models": [
     { "id": "local-cheap", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
-      "baseURL": "http://127.0.0.1:8079/v1", "apiKeyEnv": "LLAMA_API_KEY",
+      "baseURL": "http://127.0.0.1:9931/v1", "apiKeyEnv": "LLAMA_API_KEY",
       "costWeight": 1, "latencyWeight": 1, "default": true },
     { "id": "local-fast", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
-      "baseURL": "http://127.0.0.1:8079/v1", "apiKeyEnv": "LLAMA_API_KEY",
+      "baseURL": "http://127.0.0.1:9931/v1", "apiKeyEnv": "LLAMA_API_KEY",
       "costWeight": 2, "latencyWeight": 0.5 }
   ]
 }

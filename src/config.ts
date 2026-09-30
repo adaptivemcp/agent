@@ -22,7 +22,7 @@ export interface AgentConfig {
  * them. Set `AI_MODEL` (etc.) to use a different backend.
  */
 export const LOCAL_PROVIDER_DEFAULTS = {
-  baseURL: "http://127.0.0.1:8079/v1",
+  baseURL: "http://127.0.0.1:9931/v1",
   model: "Qwen/Qwen3-8B",
   apiKeyEnv: "LLAMA_API_KEY",
 } as const;

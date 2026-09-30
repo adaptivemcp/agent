@@ -9,7 +9,7 @@ const LOCAL: ModelIntegration = {
   id: "local",
   provider: "openai-compatible",
   model: "Qwen/Qwen3-8B",
-  baseURL: "http://127.0.0.1:8079/v1",
+  baseURL: "http://127.0.0.1:9931/v1",
   apiKeyEnv: "LLAMA_API_KEY",
   costWeight: 1,
   latencyWeight: 1,

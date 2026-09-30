@@ -39,7 +39,7 @@ pnpm dev -- --help # CLI (tsx)
 ```
 
 By default `pnpm dev` targets a local `llama-server`
-(`${AI_BASE_URL:-http://127.0.0.1:8079/v1}`, key `$AI_API_KEY`/`$LLAMA_API_KEY`)
+(`${AI_BASE_URL:-http://127.0.0.1:9931/v1}`, key `$AI_API_KEY`/`$LLAMA_API_KEY`)
 and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override both.
 
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
