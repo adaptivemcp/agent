@@ -19,13 +19,16 @@ import type {
   Annotation,
   DecodingRecommendation,
   ModelCapabilities,
+  ResolvedDecodingSettings,
   RiskLevel,
   ToolDecoding,
   ToolRecord,
 } from "@adaptivemcp/spec";
 import type {
+  AgentDecision,
   AgentExecutor,
   ChatParams,
+  DecisionProvider,
   DecodingProvider,
   ExecutionContext,
   ModelSelector,
@@ -35,6 +38,13 @@ import type {
 } from "./types.js";
 import type { ModelCatalog } from "./models/catalog.js";
 import type { McpToolResult } from "./mcp/toolset.js";
+import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
+import {
+  OllamaSystemOneBackend,
+  SYSTEM_ONE_DEFAULT_BASE_URL,
+  SYSTEM_ONE_DEFAULT_MODEL,
+} from "./decision/systemone.js";
+import { SystemOneAdvisor, type DecisionToolInfo, type SystemOneDecision } from "./decision/advisor.js";
 
 /** Performs the raw MCP tool call (transport lives behind this seam). */
 export type ToolInvoker = (toolName: string, input: unknown, serverName?: string) => Promise<McpToolResult>;
@@ -94,6 +104,25 @@ export interface AgentRuntimeOptions {
   onExecuted?: (observation: ExecutionObservation) => void;
 }
 
+/** Configuration for the System One decision layer (`systemOneProvider`). */
+export interface SystemOneProviderOptions {
+  /** Ollama root URL. Defaults to `$OLLAMA_BASE_URL`, else localhost. */
+  baseURL?: string;
+  /** System One model. Defaults to `$SYSTEM1_MODEL`, else `tev1:0.8b`. */
+  model?: string;
+  /** Ignore answers below this confidence (default 0.5). */
+  minConfidence?: number;
+  /** Abort the decision call after this long (default 8000ms). */
+  timeoutMs?: number;
+  /** Injectable fetch, for tests. */
+  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+  /** Backend id for observability; defaults to `ollama:<model>`. */
+  backendId?: string;
+  /** Called when the decision backend fails (the provider then declines). */
+  onError?: (error: unknown) => void;
+}
+
 /**
  * The agent's bridge into the Adaptive MCP adaptation loop.
  *
@@ -113,6 +142,7 @@ export class AgentRuntime implements AgentExecutor {
   private readonly warnedSignals = new Set<string>();
   private readonly serverBudgets = new Map<string, number>();
   private lastDecoding?: ToolDecoding;
+  private lastSystemOne?: SystemOneDecision;
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
@@ -561,6 +591,92 @@ export class AgentRuntime implements AgentExecutor {
   }
 
   /**
+   * Build a `DecisionProvider` for `runAgent` backed by a fast, local System One
+   * model (Ollama `/v1/systemone`). One cheap call turns the learned tool
+   * metadata and the user's request into a model / tool-intent / decoding
+   * decision, which the loop applies before the slower chat model runs. When the
+   * decision layer declines (backend down, low confidence), the loop falls back
+   * to `selectModel`/`decoding`, so this stays purely additive.
+   *
+   * Today only a local Ollama backend (`tev1:0.8b` by default) is wired; the
+   * `DecisionBackend` seam takes remote tier backends (jev, laya, OpenAI) later.
+   */
+  systemOneProvider(catalog: ModelCatalog, options: SystemOneProviderOptions = {}): DecisionProvider {
+    const env = options.env ?? process.env;
+    const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
+    const backend = new OllamaSystemOneBackend({
+      id: options.backendId ?? `ollama:${model}`,
+      baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
+      model,
+      timeoutMs: options.timeoutMs,
+      fetchImpl: options.fetchImpl,
+    });
+    const advisor = new SystemOneAdvisor({
+      backend,
+      minConfidence: options.minConfidence,
+      onError: options.onError,
+    });
+
+    return async (request) => {
+      const message =
+        [...request.messages].reverse().find((message) => message.role === "user")?.content ?? "";
+      const decision = await advisor.decide({
+        message,
+        tools: this.decisionToolInfos(),
+        models: catalog.list().map((integration) => ({
+          id: integration.id,
+          label: integration.label,
+          costWeight: integration.costWeight,
+          latencyWeight: integration.latencyWeight,
+        })),
+      });
+      if (!decision) return undefined;
+      this.lastSystemOne = decision;
+
+      const model = decision.modelId ? catalog.get(decision.modelId) : undefined;
+      const capabilities = (model ?? catalog.defaultModel()).capabilities ?? AI_SDK_CAPABILITIES;
+      const decoded = decision.decodingProfile
+        ? resolvedToChatParams(this.resolver.resolve({ id: decision.decodingProfile }, capabilities))
+        : undefined;
+      const tools = decision.toolNames
+        ? request.tools.filter((spec) => decision.toolNames!.includes(spec.name))
+        : undefined;
+
+      const applied: AgentDecision = { rationale: decision.rationale };
+      if (model) applied.model = model;
+      if (tools) applied.tools = tools;
+      if (decoded) applied.decoding = decoded;
+      return applied;
+    };
+  }
+
+  /** A compact summary of the last System One decision (for the REPL). */
+  lastDecisionSummary(): string {
+    const decision = this.lastSystemOne;
+    if (!decision) return "(no System One decision yet)";
+    const parts = [`confidence ${decision.confidence.toFixed(2)}`];
+    if (decision.modelId) parts.push(`model ${decision.modelId}`);
+    if (decision.toolNames) {
+      parts.push(decision.toolNames.length > 0 ? `tools ${decision.toolNames.join(", ")}` : "tools none");
+    }
+    if (decision.decodingProfile) parts.push(`decoding ${decision.decodingProfile}`);
+    return `${parts.join(", ")}\n  ${decision.rationale}`;
+  }
+
+  /** Tool metadata as a compact list for the System One decision state. */
+  private decisionToolInfos(): DecisionToolInfo[] {
+    return this.adaptive.memory.allTools().map((record) => ({
+      toolName: record.toolName,
+      serverName: record.serverName,
+      description: record.annotation.description,
+      risk: record.annotation.risk,
+      invocations: record.stats.invocations,
+      failureRate: record.stats.failureRate,
+      avgDurationMs: record.stats.avgDurationMs ?? undefined,
+    }));
+  }
+
+  /**
    * Adaptive MCP's recommended model id for a tool, from the `Router`'s learned
    * `model` recommendation. Re-runs the router for this tool first so the answer
    * reflects the latest stats; returns `undefined` when there is not enough
@@ -615,7 +731,11 @@ export class AgentRuntime implements AgentExecutor {
 
 /** Map a resolved decoding recommendation onto the loop's `ChatParams`. */
 function toChatParams(recommendation: DecodingRecommendation): ChatParams | undefined {
-  const { resolved } = recommendation;
+  return resolvedToChatParams(recommendation.resolved);
+}
+
+/** Map resolved decoding settings onto the loop's `ChatParams`. */
+function resolvedToChatParams(resolved: ResolvedDecodingSettings): ChatParams | undefined {
   const params: ChatParams = {};
   if (resolved.temperature !== undefined) params.temperature = resolved.temperature;
   if (resolved.topP !== undefined) params.topP = resolved.topP;

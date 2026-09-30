@@ -473,6 +473,36 @@ describe("agent loop", () => {
     await tools.close();
   });
 
+  it("applies a decision layer's model, tools, and decoding", async () => {
+    const tools = toolset();
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s25");
+    const base = new FixedModel("base", "from base");
+    const chosen = new RecordingModel(new FixedModel("decided", "from decided"));
+    const events: AgentEvent[] = [];
+
+    const result = await runAgent({
+      model: base,
+      tools: specs,
+      executor: runtime,
+      messages: [{ role: "user", content: "hi" }],
+      decide: () => ({
+        model: chosen,
+        tools: specs.filter((spec) => spec.name === "search_customer"),
+        decoding: { temperature: 0.1 },
+        rationale: "test decision",
+      }),
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(events.some((event) => event.type === "decision_applied")).toBe(true);
+    expect(result.messages.at(-1)?.content).toBe("from decided");
+    expect(chosen.params[0]?.temperature).toBe(0.1);
+
+    runtime.close();
+    await tools.close();
+  });
+
   it("routes to the model Adaptive MCP learned for the governing tool", async () => {
     const tools = toolset();
     const specs = await tools.listTools();

@@ -14,7 +14,8 @@ import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
 import { exampleServerOptions, parseServer } from "./config.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
-import { loadCatalog, type ModelCatalog } from "./models/catalog.js";
+import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
+import { discoverOllamaIntegrations } from "./models/ollama.js";
 import type { AgentEvent, ChatModel } from "./types.js";
 
 interface CliArgs {
@@ -23,6 +24,12 @@ interface CliArgs {
   model?: string;
   /** Catalog file for extra/overridden integrations. */
   models?: string;
+  /** Disable Ollama /api/tags auto-discovery. */
+  noOllama: boolean;
+  /** Enable the System One fast decision layer. */
+  system1: boolean;
+  /** System One model id (default: $SYSTEM1_MODEL, else tev1:0.8b). */
+  system1Model?: string;
   baseUrl?: string;
   apiKey?: string;
   servers: string[];
@@ -56,6 +63,8 @@ function parseArgs(argv: string[]): CliArgs {
     compress: false,
     report: false,
     serverPolicy: true,
+    noOllama: false,
+    system1: false,
     verbose: false,
     help: false,
   };
@@ -76,6 +85,15 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--models":
         args.models = next();
+        break;
+      case "--no-ollama":
+        args.noOllama = true;
+        break;
+      case "--system1":
+        args.system1 = true;
+        break;
+      case "--system1-model":
+        args.system1Model = next();
         break;
       case "--base-url":
         args.baseUrl = next();
@@ -166,6 +184,9 @@ Options:
   -i, --interactive             Force the interactive REPL
   --model <id>                  Pin one catalog model (disables adaptive selection)
   --models <file>               Catalog file of model integrations (JSON)
+  --no-ollama                   Don't auto-discover models from a local Ollama
+  --system1                     Enable the System One fast decision layer (Ollama)
+  --system1-model <id>          System One model (default: $SYSTEM1_MODEL, tev1:0.8b)
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
@@ -219,7 +240,14 @@ async function main(): Promise<void> {
 
   let catalog: ModelCatalog;
   try {
-    catalog = loadCatalog({ file: args.models, env });
+    let discovered: ModelIntegration[] = [];
+    if (!args.noOllama) {
+      discovered = await discoverOllamaIntegrations({ env });
+      if (args.verbose && discovered.length > 0) {
+        console.log(`[ollama] discovered ${discovered.length} model(s)`);
+      }
+    }
+    catalog = loadCatalog({ file: args.models, env, discovered });
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
@@ -363,6 +391,11 @@ async function main(): Promise<void> {
     const selectModel = pinned ? undefined : runtime.modelProvider(catalog);
     const capabilities = defaultModel.capabilities ?? AI_SDK_CAPABILITIES;
     const decoding = runtime.decodingProvider(capabilities);
+    // Fast System-1 decision layer in front of the router (opt-in).
+    const decide =
+      args.system1 && !pinned
+        ? runtime.systemOneProvider(catalog, { model: args.system1Model })
+        : undefined;
 
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
@@ -372,10 +405,12 @@ async function main(): Promise<void> {
         executor: runtime,
         decoding,
         selectModel,
+        decide,
         maxSteps,
         stream,
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
+        decision: () => runtime.lastDecisionSummary(),
         cost: () => runtime.costSummary(),
         policy: () => runtime.serverPolicySummary(),
         drift: () => runtime.metricDriftReport(),
@@ -412,6 +447,7 @@ async function main(): Promise<void> {
       maxSteps,
       decoding,
       selectModel,
+      decide,
       stream,
       messages: [
         { role: "system", content: learned ? `${baseSystem}\n\n${learned}` : baseSystem },
@@ -450,6 +486,15 @@ function renderOneShot(event: AgentEvent, verbose: boolean): void {
     case "decoding_applied":
       if (verbose) console.log(`· decoding ${JSON.stringify(event.params)}`);
       break;
+    case "decision_applied": {
+      if (!verbose) break;
+      const parts: string[] = [];
+      if (event.model) parts.push(`model ${event.model}`);
+      if (event.tools) parts.push(`tools ${event.tools.join(",") || "none"}`);
+      if (event.rationale) parts.push(event.rationale);
+      console.log(`· system1 ${parts.join(" | ")}`);
+      break;
+    }
     case "tool_call":
       console.log(`→ ${event.call.name}(${JSON.stringify(event.call.input ?? {})})`);
       break;

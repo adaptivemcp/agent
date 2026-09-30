@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ModelOption } from "@adaptivemcp/routing";
 import { LOCAL_PROVIDER_DEFAULTS } from "../config.js";
 import type { ChatModel } from "../types.js";
-import { createChatModel, isAvailable } from "./factory.js";
+import { createChatModel, apiKeyCount, isAvailable } from "./factory.js";
 import type { ModelCatalogFile, ModelIntegration } from "./types.js";
 
 export type { ModelCatalogFile, ModelIntegration, ModelProviderKind } from "./types.js";
@@ -127,20 +127,30 @@ export class ModelCatalog {
       .map((integration) => {
         const marker = integration.id === this.defaultId ? " (default)" : "";
         const label = integration.label ? ` ${integration.label}` : "";
-        return `  ${integration.id}${marker} — ${integration.provider}/${integration.model}${label}`;
+        const keys = apiKeyCount(integration, this.env);
+        const pool = keys > 1 ? ` (${keys} keys pooled)` : "";
+        return `  ${integration.id}${marker} — ${integration.provider}/${integration.model}${label}${pool}`;
       })
       .join("\n");
   }
 }
 
 /**
- * Load the catalog: built-in integrations, merged with an optional catalog file
- * (`--models <path>` or `$AGENT_MODELS`). File entries with a known `id` override
- * the matching built-in field-by-field; new ids are appended.
+ * Load the catalog: built-in integrations, plus any discovered integrations
+ * (e.g. Ollama models), merged with an optional catalog file (`--models <path>`
+ * or `$AGENT_MODELS`). File entries with a known `id` override the matching
+ * built-in field-by-field; new ids are appended last.
  */
-export function loadCatalog(options: { file?: string; env?: NodeJS.ProcessEnv } = {}): ModelCatalog {
+export function loadCatalog(
+  options: { file?: string; env?: NodeJS.ProcessEnv; discovered?: ModelIntegration[] } = {},
+): ModelCatalog {
   const env = options.env ?? process.env;
   const integrations = builtinIntegrations(env);
+  for (const discovered of options.discovered ?? []) {
+    if (!integrations.some((integration) => integration.id === discovered.id)) {
+      integrations.push(discovered);
+    }
+  }
   const file = options.file ?? env.AGENT_MODELS;
   let defaultId: string | undefined;
 

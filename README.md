@@ -57,7 +57,7 @@ In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
 `/models`, `/graph` (the per-turn execution DAG), `/metadata`, `/cost`,
 `/policy`, `/drift`, `/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`,
-`/reset`, `/exit`.
+`/decision` (the last System One decision), `/reset`, `/exit`.
 
 - **Approvals.** Tools the gate marks `require_confirmation` — high-risk from the
   server's standard MCP annotations, or learned-flaky — prompt
@@ -100,7 +100,21 @@ Built-in integrations (only those whose key is set become active):
 | `openai` | OpenAI-compatible | `gpt-4o-mini` | `OPENAI_API_KEY` |
 | `anthropic` | Anthropic | `claude-3-5-haiku-latest` | `ANTHROPIC_API_KEY` |
 | `google` | Google | `gemini-2.5-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| `ollama-<model>` | Ollama (auto-discovered) | each pulled model | none (local) |
 
+- **Ollama (auto-discovered).** On startup the agent queries a running Ollama
+  server's `GET /api/tags` (default `http://127.0.0.1:11434`, override with
+  `$OLLAMA_BASE_URL`) and registers each pulled model as an integration
+  (`ollama-qwen3-5-4b`, `ollama-tev1-0-8b`, …). Discovery is best-effort: if the
+  server is down the catalog simply starts without those entries. `--no-ollama`
+  disables it.
+- **Key pooling.** Several keys for the same provider/model (e.g.
+  `OPENAI_API_KEY`, `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3`) become a *key pool*:
+  one catalog entry whose `ChatModel` is a `PooledChatModel` that round-robins
+  across the keys and fails over to the next one, cooling a key down, when a call
+  throws (rate limit, auth, transient error). `$NAME` and `$NAME_2…` are pooled;
+  *alternative* env names (e.g. `AI_API_KEY` vs `LLAMA_API_KEY`) are not — the
+  first set one wins. `/models` shows `(N keys pooled)`.
 - `--model <id>` pins one catalog model (turns adaptive selection off).
 - `/models` lists the active integrations; the REPL prefixes each turn with the
   model being used, e.g. `[local]`.
@@ -125,6 +139,30 @@ Selection starts after `--router-min-invocations` (default 10) observations per
 tool, so it needs either a few runs against a persistent `--db` or a lower
 threshold for demos.
 
+### System One decisions (fast path)
+
+`--system1` adds a *System-1* decision layer in front of the router: one cheap,
+local call to an Ollama System One model
+([`/v1/systemone`](https://docs.ollama.com/api/systemone)) that turns the learned
+Adaptive MCP metadata (tool reliability, annotations) plus the user's request
+into a single JSON verdict on **which model**, **which tool** (if any), and
+**which decoding profile** to use. The loop applies the verdict before the slower
+chat model runs; when the decision model is down or not confident, it declines
+and the Router/`--model` fallback takes over.
+
+```bash
+ollama pull tev1:0.8b          # a local System One model
+pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
+```
+
+- `--system1-model <id>` selects the decision model (`$SYSTEM1_MODEL`).
+- The backend URL reuses `$OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`).
+- `/decision` shows the last decision (model, tools, decoding, confidence,
+  rationale).
+- Remote decision backends (jev, laya, an OpenAI decision endpoint) implement the
+  same `DecisionBackend` seam and can be tiered in later; tev1 is the only one
+  wired today.
+
 ### Against your own endpoint and servers
 
 ```bash
@@ -140,6 +178,9 @@ pnpm dev -- \
   and the derived view after a one-shot run.
 - `AI_BASE_URL` accepts any OpenAI-compatible endpoint (OpenAI, Ollama, llama.cpp,
   vLLM, ...).
+- `--no-ollama` skips Ollama model auto-discovery; `--system1` /
+  `--system1-model <id>` enable and configure the System One decision layer
+  (see [System One decisions](#system-one-decisions-fast-path)).
 - `--list-tools` prints discovered tools and exits; `--db`/`--yaml` persist the
   store and the derived view of the agent's own store (the MCP server keeps its
   own).

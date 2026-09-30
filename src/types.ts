@@ -136,6 +136,29 @@ export type ModelSelector = (
   request: ModelSelectionRequest,
 ) => ChatModel | undefined | Promise<ChatModel | undefined>;
 
+/**
+ * A whole-turn decision from a fast decision layer (e.g. the System One
+ * advisor): which model, which tools, and which decoding to use for this step.
+ * Any omitted field falls back to the loop's default (`model` / `selectModel`,
+ * `tools`, `params` / `decoding`).
+ */
+export interface AgentDecision {
+  model?: ChatModel;
+  tools?: ToolSpec[];
+  decoding?: ChatParams;
+  /** Short explanation, surfaced on the `decision_applied` event. */
+  rationale?: string;
+}
+
+/**
+ * Supplies a per-step decision (model, tools, decoding) before each completion.
+ * Returning `undefined` means "no opinion"; the loop falls back to `selectModel`
+ * / `decoding` / its defaults.
+ */
+export type DecisionProvider = (
+  request: ModelSelectionRequest,
+) => AgentDecision | undefined | Promise<AgentDecision | undefined>;
+
 export interface ToolExecutionResult {
   ok: boolean;
   output?: unknown;
@@ -188,6 +211,13 @@ export type AgentEvent =
       step: number;
     }
   | { type: "decoding_applied"; params: ChatParams; step: number }
+  | {
+      type: "decision_applied";
+      model?: string;
+      tools?: string[];
+      rationale?: string;
+      step: number;
+    }
   | { type: "guard"; message: string; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
   | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };

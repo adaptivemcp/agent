@@ -59,7 +59,16 @@ The agent is three seams plus a loop (`src/`):
 step, execute any tool calls through the executor, append the results, repeat
 until no tool calls or `maxSteps`. Each step's model can be chosen by
 `selectModel` (Adaptive MCP routing via `AgentRuntime.modelProvider`) from the
-`src/models/` catalog; `--model <id>` pins one.
+`src/models/` catalog; `--model <id>` pins one. An optional `decide`
+(`DecisionProvider`, e.g. `AgentRuntime.systemOneProvider`) runs first and may
+override the step's model, tool subset, and decoding.
+
+The model catalog (`src/models/`) is the *pool of resources*: it auto-discovers
+pulled Ollama models from `GET /api/tags` (`src/models/ollama.ts`) and pools
+several keys for the same provider/model (`OPENAI_API_KEY`, `OPENAI_API_KEY_2`,
+…) into one `PooledChatModel` (`src/models/pool.ts`) that fails over between
+them. The System One decision layer (`src/decision/`) is a separate, local,
+non-chat HTTP seam — never a `ChatModel`.
 
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
@@ -76,6 +85,12 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `suggestModel(tool, { server })` — the `Router`'s learned model id for a tool.
 - `modelProvider(catalog, { tool, server })` — a `ModelSelector` for `runAgent`
   that routes each step to the learned model (or the catalog default).
+- `systemOneProvider(catalog, { model })` — a `DecisionProvider` for `runAgent`
+  backed by a fast, local System One model (Ollama `/v1/systemone`, `tev1:0.8b`
+  by default). One cheap call decides model + tool intent + decoding from the
+  learned metadata; it declines (falling back to `modelProvider`) when the
+  backend fails or is not confident. Remote backends implement `DecisionBackend`
+  later. `lastDecisionSummary()` powers the REPL's `/decision`.
 - `seedToolAnnotations(specs)` — seed static risk from standard MCP tool
   annotations so the gate can prompt before learning.
 - `applyServerMetadata(doc, {server})` / `serverPolicySummary()` — read and apply

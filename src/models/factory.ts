@@ -5,6 +5,7 @@ import type { LanguageModel } from "ai";
 import type { ModelCapabilities } from "@adaptivemcp/spec";
 import { AiSdkModel, AI_SDK_CAPABILITIES } from "../provider/ai-sdk.js";
 import type { ChatModel } from "../types.js";
+import { PooledChatModel } from "./pool.js";
 import type { ModelIntegration, ModelProviderKind } from "./types.js";
 
 const ANTHROPIC_CAPABILITIES: ModelCapabilities = {
@@ -21,16 +22,46 @@ function apiKeyEnvNames(integration: ModelIntegration): string[] {
   return Array.isArray(integration.apiKeyEnv) ? integration.apiKeyEnv : [integration.apiKeyEnv];
 }
 
+/**
+ * Every configured key for an integration, in pool order. An integration's
+ * `apiKeyEnv` may name several *alternative* vars (the first set one wins);
+ * once a name matches, numbered siblings of that same name (`<NAME>_2`,
+ * `<NAME>_3`, ...) are treated as extra keys in the pool, so several keys for
+ * the same provider/model become interchangeable resources rather than
+ * conflicting aliases.
+ */
+export function apiKeysFor(
+  integration: ModelIntegration,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  for (const name of apiKeyEnvNames(integration)) {
+    const primary = env[name];
+    if (!primary) continue;
+    const keys = [primary];
+    for (let index = 2; ; index += 1) {
+      const value = env[`${name}_${index}`];
+      if (!value) break;
+      keys.push(value);
+    }
+    return keys;
+  }
+  return [];
+}
+
+/** The number of pooled keys configured for an integration (0 when it needs none). */
+export function apiKeyCount(
+  integration: ModelIntegration,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return apiKeysFor(integration, env).length;
+}
+
 /** The first configured key for an integration, if any. */
 export function apiKeyFor(
   integration: ModelIntegration,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  for (const name of apiKeyEnvNames(integration)) {
-    const value = env[name];
-    if (value) return value;
-  }
-  return undefined;
+  return apiKeysFor(integration, env)[0];
 }
 
 /**
@@ -74,11 +105,18 @@ export function createChatModel(
   integration: ModelIntegration,
   env: NodeJS.ProcessEnv = process.env,
 ): ChatModel {
-  const languageModel = buildLanguageModel(integration, apiKeyFor(integration, env));
-  return new AiSdkModel(
-    languageModel,
-    integration.id,
-    integration.capabilities ?? defaultCapabilities(integration.provider),
-    integration.pricing,
-  );
+  const capabilities = integration.capabilities ?? defaultCapabilities(integration.provider);
+  const build = (apiKey?: string): ChatModel =>
+    new AiSdkModel(
+      buildLanguageModel(integration, apiKey),
+      integration.id,
+      capabilities,
+      integration.pricing,
+    );
+
+  const keys = apiKeysFor(integration, env);
+  // One key (or none) is the common case; several become a key pool that fails
+  // over between resources of the same model.
+  if (keys.length <= 1) return build(keys[0]);
+  return new PooledChatModel(keys.map((key) => build(key)), integration.id);
 }

@@ -6,6 +6,7 @@ import type {
   AgentExecutor,
   ChatMessage,
   ChatModel,
+  DecisionProvider,
   DecodingProvider,
   ModelSelector,
   ToolSpec,
@@ -23,6 +24,8 @@ export interface ReplOptions {
   executor: AgentExecutor & Partial<ApprovalHost>;
   decoding?: DecodingProvider;
   selectModel?: ModelSelector;
+  /** Fast System-1 decision layer (e.g. `AgentRuntime.systemOneProvider`). */
+  decide?: DecisionProvider;
   system?: string;
   maxSteps?: number;
   stream?: boolean;
@@ -50,6 +53,8 @@ export interface ReplOptions {
   graph?: () => string;
   /** Text for `/models` (the model catalog). */
   models?: () => string;
+  /** Text for `/decision` (the last System One decision). */
+  decision?: () => string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
 }
@@ -99,7 +104,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
       `${color.dim("model:")} ${options.model.name}  ${color.dim("tools:")} ${options.tools.length}  ` +
-      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /drift, /retrieve <hash>, /decoding <tool>, /decoding-report, /reset, /exit")}\n\n`,
+      `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /drift, /retrieve <hash>, /decoding <tool>, /decoding-report, /decision, /reset, /exit")}\n\n`,
   );
 
   let lineStart = true;
@@ -200,6 +205,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /retrieve [hash]     fetch a compressed tool output's original (default: last)\n" +
                 "  /decoding <tool>    show the learned decoding recommendation for a tool\n" +
                 "  /decoding-report    summarized applied-decoding telemetry\n" +
+                "  /decision           show the last System One decision\n" +
                 "  /reset              clear the conversation\n" +
                 "  /exit               quit\n",
             );
@@ -249,6 +255,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
               options.decodingReport ? `${options.decodingReport()}\n` : color.dim("(no decoding telemetry)\n"),
             );
             continue;
+          case "/decision":
+            output.write(options.decision ? `${options.decision()}\n` : color.dim("(no decision layer)\n"));
+            continue;
           case "/reset":
             messages = [{ role: "system", content: baseSystem }];
             persistHistory();
@@ -281,6 +290,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
           maxSteps: options.maxSteps,
           decoding: options.decoding,
           selectModel: options.selectModel,
+          decide: options.decide,
           stream: options.stream,
           onEvent: render,
         });

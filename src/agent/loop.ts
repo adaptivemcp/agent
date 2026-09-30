@@ -7,6 +7,7 @@ import type {
   ChatModel,
   ChatParams,
   ChatUsage,
+  DecisionProvider,
   DecodingProvider,
   ModelSelector,
   ToolSpec,
@@ -32,6 +33,12 @@ export interface RunAgentOptions {
    */
   selectModel?: ModelSelector;
   /**
+   * Optional fast decision layer (e.g. the System One advisor). When present it
+   * runs first and its model/tools/decoding win; `selectModel`/`decoding` are
+   * the fallback when the decision layer declines.
+   */
+  decide?: DecisionProvider;
+  /**
    * Stream tokens when the model supports it (default: `true` when
    * `model.stream` exists). Streamed chunks arrive as `text_delta` events.
    */
@@ -46,31 +53,52 @@ export interface RunAgentOptions {
  */
 export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult> {
   const messages = [...options.messages];
-  const toolsByName = new Map(options.tools.map((spec) => [spec.name, spec]));
   const maxSteps = options.maxSteps ?? 8;
   const emit = (event: AgentEvent): void => options.onEvent?.(event);
 
   for (let step = 0; step < maxSteps; step += 1) {
-    const selectedModel = options.selectModel
-      ? await options.selectModel({ step, messages, tools: options.tools })
+    // Fast decision layer first (System One), then the slower router, then the
+    // loop's defaults. A decision's tools replace the full tool set for this
+    // step, which is how intent steering narrows what the model can call.
+    const decision = options.decide
+      ? await options.decide({ step, messages, tools: options.tools })
       : undefined;
+    const selectedModel =
+      decision?.model ??
+      (options.selectModel
+        ? await options.selectModel({ step, messages, tools: options.tools })
+        : undefined);
     const activeModel = selectedModel ?? options.model;
     if (selectedModel) emit({ type: "model_selected", model: activeModel.name, step });
 
-    const decoded = options.decoding
-      ? await options.decoding({ step, messages, tools: options.tools })
-      : undefined;
+    const activeTools = decision?.tools ?? options.tools;
+    const toolsByName = new Map(activeTools.map((spec) => [spec.name, spec]));
+
+    const decoded =
+      decision?.decoding ??
+      (options.decoding
+        ? await options.decoding({ step, messages, tools: activeTools })
+        : undefined);
     const params = decoded ? { ...options.params, ...decoded } : options.params;
     if (decoded) emit({ type: "decoding_applied", params: params ?? {}, step });
+    if (decision) {
+      emit({
+        type: "decision_applied",
+        model: decision.model?.name,
+        tools: decision.tools?.map((spec) => spec.name),
+        rationale: decision.rationale,
+        step,
+      });
+    }
 
     const streamStep = options.stream === false ? undefined : activeModel.stream;
     let streamed = false;
     const chat = streamStep
-      ? await streamStep.call(activeModel, messages, options.tools, params ?? {}, (text) => {
+      ? await streamStep.call(activeModel, messages, activeTools, params ?? {}, (text) => {
           streamed = true;
           emit({ type: "text_delta", text, step });
         })
-      : await activeModel.step(messages, options.tools, params);
+      : await activeModel.step(messages, activeTools, params);
     // With streaming the text already reached the listener as `text_delta`
     // events, so only emit the whole-message event on the non-streaming path.
     if (chat.text && !streamed) emit({ type: "assistant_text", text: chat.text, step });
