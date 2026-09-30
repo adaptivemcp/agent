@@ -99,7 +99,7 @@ Built-in integrations (only those whose key is set become active):
 | `local` | OpenAI-compatible (llama.cpp) | `Qwen/Qwen3-8B` | `LLAMA_API_KEY` / `AI_API_KEY` |
 | `openai` | OpenAI-compatible | `gpt-4o-mini` | `OPENAI_API_KEY` |
 | `anthropic` | Anthropic | `claude-3-5-haiku-latest` | `ANTHROPIC_API_KEY` |
-| `google` | Google | `gemini-2.0-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| `google` | Google | `gemini-2.5-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` |
 
 - `--model <id>` pins one catalog model (turns adaptive selection off).
 - `/models` lists the active integrations; the REPL prefixes each turn with the

@@ -52,7 +52,7 @@ export function builtinIntegrations(env: NodeJS.ProcessEnv = process.env): Model
       id: "google",
       label: "Google Gemini",
       provider: "google",
-      model: env.GOOGLE_MODEL ?? "gemini-2.0-flash",
+      model: env.GOOGLE_MODEL ?? "gemini-2.5-flash",
       apiKeyEnv: "GOOGLE_GENERATIVE_AI_API_KEY",
       costWeight: 3,
       latencyWeight: 0.8,
