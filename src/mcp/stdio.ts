@@ -3,7 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS_METADATA_EXTENSION } from "@adaptivemcp/spec";
 import type { ToolSpec } from "../types.js";
-import type { McpToolResult, Toolset } from "./toolset.js";
+import type { McpToolResult, ResourceToolset } from "./toolset.js";
 
 export interface StdioToolsetOptions {
   /** Display name for this server (used for namespacing / telemetry). */
@@ -19,7 +19,7 @@ export interface StdioToolsetOptions {
  * A real MCP client over stdio, built on the official SDK. One instance owns one
  * server connection and its lifecycle.
  */
-export class StdioToolset implements Toolset {
+export class StdioToolset implements ResourceToolset {
   private client: Client | undefined;
 
   constructor(readonly serverName: string, private readonly options: StdioToolsetOptions) {}
@@ -113,7 +113,7 @@ export class StdioToolset implements Toolset {
 }
 
 /** Prefer `structuredContent`; otherwise join text content parts. */
-function extractOutput(result: CallToolResult): unknown {
+export function extractOutput(result: CallToolResult): unknown {
   if (result.structuredContent !== undefined) return result.structuredContent;
   const texts = result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")

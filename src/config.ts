@@ -6,9 +6,27 @@ import type { ApprovalPolicy } from "@adaptivemcp/approval";
 import type { AiSdkProviderConfig } from "./provider/ai-sdk.js";
 import type { StdioToolsetOptions } from "./mcp/stdio.js";
 
+/** A remote (Streamable HTTP) MCP server spec. Discriminated by `transport`. */
+export interface HttpServerOptions {
+  serverName: string;
+  transport: "http";
+  /** Streamable HTTP endpoint, e.g. `http://127.0.0.1:8765/mcp`. */
+  url: string;
+  /** Static headers sent with every request (e.g. a bearer token). */
+  headers?: Record<string, string>;
+}
+
+/** A parsed `--server` spec: local stdio, or remote HTTP. */
+export type ServerSpec = StdioToolsetOptions | HttpServerOptions;
+
+/** Narrow a server spec to the remote HTTP variant. */
+export function isHttpServerSpec(spec: ServerSpec): spec is HttpServerOptions {
+  return (spec as HttpServerOptions).transport === "http";
+}
+
 export interface AgentConfig {
   provider: AiSdkProviderConfig;
-  servers: StdioToolsetOptions[];
+  servers: ServerSpec[];
   dbPath?: string;
   yamlPath?: string;
   maxSteps: number;
@@ -27,8 +45,8 @@ export const LOCAL_PROVIDER_DEFAULTS = {
   apiKeyEnv: "LLAMA_API_KEY",
 } as const;
 
-/** Parse a `name=command arg1 arg2` server spec. */
-export function parseServer(spec: string): StdioToolsetOptions {
+/** Parse a `name=command arg1 arg2` stdio spec, or a JSON object (stdio or HTTP). */
+export function parseServer(spec: string): ServerSpec {
   const trimmed = spec.trim();
   // Rich form: a JSON object, for options the shorthand cannot express
   // (per-server `cwd` and `env`), e.g.
@@ -51,8 +69,8 @@ export function parseServer(spec: string): StdioToolsetOptions {
   return { serverName, command, args: tokens.slice(1) };
 }
 
-/** Parse the JSON-object server spec (per-server `cwd`/`env`/`args`). */
-function parseServerJson(spec: string): StdioToolsetOptions {
+/** Parse the JSON-object server spec (stdio options, or a remote HTTP server). */
+function parseServerJson(spec: string): ServerSpec {
   let parsed: unknown;
   try {
     parsed = JSON.parse(spec);
@@ -67,6 +85,32 @@ function parseServerJson(spec: string): StdioToolsetOptions {
   if (typeof name !== "string" || name.trim() === "") {
     throw new Error("invalid server spec (missing string 'name')");
   }
+
+  if (obj.transport === "http" || obj.url !== undefined) {
+    if (typeof obj.url !== "string" || obj.url.trim() === "") {
+      throw new Error("invalid server spec (missing string 'url' for an HTTP server)");
+    }
+    const http: HttpServerOptions = {
+      serverName: name.trim(),
+      transport: "http",
+      url: obj.url.trim(),
+    };
+    if (obj.headers !== undefined) {
+      if (typeof obj.headers !== "object" || obj.headers === null || Array.isArray(obj.headers)) {
+        throw new Error("invalid server spec ('headers' must be an object of strings)");
+      }
+      const headers: Record<string, string> = {};
+      for (const [key, value] of Object.entries(obj.headers)) {
+        if (typeof value !== "string") {
+          throw new Error("invalid server spec ('headers' values must be strings)");
+        }
+        headers[key] = value;
+      }
+      http.headers = headers;
+    }
+    return http;
+  }
+
   if (typeof obj.command !== "string" || obj.command.trim() === "") {
     throw new Error("invalid server spec (missing string 'command')");
   }
@@ -98,7 +142,7 @@ function parseServerJson(spec: string): StdioToolsetOptions {
   return options;
 }
 
-export function parseServers(specs: string[]): StdioToolsetOptions[] {
+export function parseServers(specs: string[]): ServerSpec[] {
   return specs.map(parseServer);
 }
 

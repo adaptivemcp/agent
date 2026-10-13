@@ -58,7 +58,7 @@ The agent is three seams plus a loop (`src/`):
 | Seam | Interface | Implementations |
 | --- | --- | --- |
 | Model | `ChatModel` (`src/types.ts`) | `AiSdkModel` (Vercel AI SDK, OpenAI-compatible; `step` + token streaming), `ScriptedModel` (tests/demo) |
-| Transport | `Toolset` (`src/mcp/toolset.ts`) | `StdioToolset` (official MCP SDK, stdio), `InMemoryToolset` (tests/demo), `AggregateToolset` (namespaced multi-server) |
+| Transport | `Toolset` (`src/mcp/toolset.ts`) | `StdioToolset` (official MCP SDK, stdio), `HttpToolset` (official MCP SDK, Streamable HTTP), `InMemoryToolset` (tests/demo), `AggregateToolset` (namespaced multi-server) |
 | Execution | `AgentExecutor` (`src/types.ts`) | `AgentRuntime` (`src/runtime.ts`) |
 
 `runAgent` (`src/agent/loop.ts`) is the tool-calling loop: ask the model for one

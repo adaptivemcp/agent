@@ -18,6 +18,17 @@ export interface Toolset {
   close(): Promise<void>;
 }
 
+/**
+ * A toolset that additionally exposes MCP resources and the server's
+ * `initialize` instructions (both transports do; the in-memory test toolset
+ * does not). Consumers read a server's `tools-metadata` resource through this.
+ */
+export interface ResourceToolset extends Toolset {
+  listResources(): Promise<Array<{ uri: string; name?: string; mimeType?: string }>>;
+  readResource(uri: string): Promise<string | undefined>;
+  instructions(): Promise<string | undefined>;
+}
+
 export interface InMemoryTool {
   name: string;
   description?: string;

@@ -27,6 +27,7 @@ export {
   type Toolset,
 } from "./mcp/toolset.js";
 export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
+export { HttpToolset, type HttpToolsetOptions } from "./mcp/http.js";
 export { ExitCode } from "./exit-codes.js";
 export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
@@ -80,6 +81,8 @@ export {
   exampleServerOptions,
   LOCAL_PROVIDER_DEFAULTS,
   type AgentConfig,
+  type HttpServerOptions,
+  type ServerSpec,
 } from "./config.js";
 export type {
   AgentDecision,

@@ -73,6 +73,33 @@ describe("config", () => {
     expect(() => parseServer('{"name":"qc","command":"qc","cwd":1}')).toThrow(/'cwd'/);
   });
 
+  it("parses a JSON HTTP server spec", () => {
+    const spec = JSON.stringify({
+      name: "remote",
+      transport: "http",
+      url: "http://127.0.0.1:8765/mcp",
+      headers: { Authorization: "Bearer t" },
+    });
+    expect(parseServer(spec)).toEqual({
+      serverName: "remote",
+      transport: "http",
+      url: "http://127.0.0.1:8765/mcp",
+      headers: { Authorization: "Bearer t" },
+    });
+  });
+
+  it("treats a JSON spec with a url as HTTP even without an explicit transport", () => {
+    expect(parseServer('{"name":"r","url":"http://x/mcp"}')).toEqual({
+      serverName: "r",
+      transport: "http",
+      url: "http://x/mcp",
+    });
+  });
+
+  it("rejects an HTTP spec without a url", () => {
+    expect(() => parseServer('{"name":"r","transport":"http"}')).toThrow(/url/);
+  });
+
   it("resolves the sibling example server when it is built", () => {
     const server = exampleServerOptions();
     if (server === undefined) return; // fresh checkout without the sibling build

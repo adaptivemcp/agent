@@ -181,6 +181,8 @@ pnpm dev -- \
   environment (e.g. QC, which resolves `qc.toml` and secrets from `cwd`), pass a
   JSON object instead:
   `--server '{"name":"qc","command":"/path/.venv/bin/qc","args":["mcp"],"cwd":"/path/project","env":{"QC_SQLITE_PATH":"/path/demo.db"}}'`.
+  Remote servers use the Streamable HTTP form:
+  `--server '{"name":"remote","transport":"http","url":"http://127.0.0.1:8765/mcp","headers":{"Authorization":"Bearer …"}}'`.
 - `--prompt "..."` runs a single turn and exits instead of starting the REPL.
 - `--no-stream` disables token streaming; `-v/--verbose` prints applied decoding
   and the derived view after a one-shot run.

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { AggregateToolset, sanitize } from "./mcp/toolset.js";
+import { AggregateToolset, sanitize, type ResourceToolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
+import { HttpToolset } from "./mcp/http.js";
 import {
   HeadroomMiddleware,
   McpHeadroomCompressor,
@@ -12,7 +13,7 @@ import { load as parseYaml } from "js-yaml";
 import { AgentRuntime, type ServerToolsMetadata } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
-import { exampleServerOptions, parseServer } from "./config.js";
+import { exampleServerOptions, isHttpServerSpec, parseServer, type ServerSpec } from "./config.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
@@ -238,7 +239,7 @@ async function main(): Promise<void> {
   }
 
   const fallbackServer = exampleServerOptions();
-  const serverSpecs =
+  const serverSpecs: ServerSpec[] =
     args.servers.length > 0
       ? args.servers.map((spec) => parseServer(spec))
       : fallbackServer
@@ -289,7 +290,11 @@ async function main(): Promise<void> {
   }
   const defaultModel = pinned ?? catalog.defaultModel();
 
-  const toolsets = serverSpecs.map((options) => new StdioToolset(options.serverName, options));
+  const toolsets: ResourceToolset[] = serverSpecs.map((spec) =>
+    isHttpServerSpec(spec)
+      ? new HttpToolset(spec.serverName, spec)
+      : new StdioToolset(spec.serverName, spec),
+  );
   const tools = new AggregateToolset(toolsets);
 
   // Optional output compression via the headroom MCP server.
