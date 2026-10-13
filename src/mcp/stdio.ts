@@ -49,6 +49,15 @@ export class StdioToolset implements Toolset {
     return client;
   }
 
+  /**
+   * The server's `initialize` instructions, if any. Untrusted text: a host MAY
+   * surface it to the model, but must label it as server-provided data.
+   */
+  async instructions(): Promise<string | undefined> {
+    const client = await this.connect();
+    return client.getInstructions();
+  }
+
   /** List the server's resources (used to discover the tools-metadata resource). */
   async listResources(): Promise<Array<{ uri: string; name?: string; mimeType?: string }>> {
     const client = await this.connect();

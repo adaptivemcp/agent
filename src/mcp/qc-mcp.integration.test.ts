@@ -52,6 +52,11 @@ describe.skipIf(!enabled || !hasQc)("qc mcp (real stdio server)", () => {
     expect(names).toContain("list_sources");
   });
 
+  it("reads the server's initialize instructions", async () => {
+    const text = await toolset.instructions();
+    expect(text ?? "").toContain("QueryCleaner");
+  });
+
   it("classifies a QC policy-denied call as a failure", async () => {
     const spec = specs.find((candidate) => candidate.name === "profile_dataset");
     expect(spec).toBeDefined();

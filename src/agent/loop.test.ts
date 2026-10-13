@@ -609,8 +609,32 @@ describe("agent loop", () => {
     await tools.close();
   });
 
-  it("runs middleware around tool execution", async () => {
-    const tools = new InMemoryToolset("demo", [{ name: "echo", handler: () => "hello" }]);
+  it("applies a local default risk for tools with no MCP annotations", async () => {
+    const tools = new InMemoryToolset("demo", [
+      { name: "plain", handler: () => ({ ok: true }) },
+      { name: "readonly", annotations: { readOnlyHint: true }, handler: () => ({ ok: true }) },
+    ]);
+    const specs = await tools.listTools();
+    const runtime = await runtimeFor(tools, "s27");
+
+    runtime.seedToolAnnotations(specs, { defaultRisk: "medium" });
+    expect(runtime.adaptive.memory.getTool("plain", "demo")?.annotation.risk).toBe("medium");
+    // Annotation-derived risk wins over the default.
+    expect(runtime.adaptive.memory.getTool("readonly", "demo")?.annotation.risk).toBe("low");
+
+    // An existing (human/learned) risk is never overwritten by the default.
+    runtime.adaptive.memory.setAnnotation({ toolName: "kept", serverName: "demo", risk: "high" });
+    runtime.seedToolAnnotations(
+      [{ name: "kept", inputSchema: { type: "object" }, serverName: "demo" }],
+      { defaultRisk: "medium" },
+    );
+    expect(runtime.adaptive.memory.getTool("kept", "demo")?.annotation.risk).toBe("high");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("runs middleware around tool execution", async () => {    const tools = new InMemoryToolset("demo", [{ name: "echo", handler: () => "hello" }]);
     const specs = await tools.listTools();
     const upper: Middleware = {
       name: "upper",

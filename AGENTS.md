@@ -97,8 +97,11 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   learned metadata; it declines (falling back to `modelProvider`) when the
   backend fails or is not confident. Remote backends implement `DecisionBackend`
   later. `lastDecisionSummary()` powers the REPL's `/decision`.
-- `seedToolAnnotations(specs)` — seed static risk from standard MCP tool
-  annotations so the gate can prompt before learning.
+- `seedToolAnnotations(specs, { defaultRisk })` — seed static risk from standard
+  MCP tool annotations (falling back to a local `defaultRisk` for servers that
+  ship none) so the gate can prompt before learning. Server `initialize`
+  instructions are read via `StdioToolset.instructions()` and surfaced to the
+  model as clearly-labelled untrusted data.
 - `applyServerMetadata(doc, {server})` / `serverPolicySummary()` — read and apply
   the server's `dev.adaptivemcp/tools-metadata` policy as a floor.
 - `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.

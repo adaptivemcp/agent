@@ -251,11 +251,14 @@ export class AgentRuntime implements AgentExecutor {
    * act before anything is learned — the spec projects server `risk` onto these
    * core hints. Advisory: an existing nonzero risk is never overridden.
    */
-  seedToolAnnotations(specs: ToolSpec[]): void {
+  seedToolAnnotations(specs: ToolSpec[], options: { defaultRisk?: RiskLevel } = {}): void {
     for (const spec of specs) {
-      const risk = riskFromAnnotations(spec.annotations);
-      if (!risk) continue;
       if (this.adaptive.memory.getTool(spec.name, spec.serverName)?.annotation.risk) continue;
+      // Prefer the protocol's own (untrusted) annotations; fall back to a local
+      // default so a server that ships none (many third-party servers) still
+      // gets a conservative, host-owned seed rather than no signal at all.
+      const risk = riskFromAnnotations(spec.annotations) ?? options.defaultRisk;
+      if (!risk) continue;
       this.adaptive.memory.setAnnotation({ toolName: spec.name, serverName: spec.serverName, risk });
     }
   }

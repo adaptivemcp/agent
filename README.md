@@ -189,6 +189,12 @@ pnpm dev -- \
 - `--no-ollama` skips Ollama model auto-discovery; `--system1` /
   `--system1-model <id>` enable and configure the System One decision layer
   (see [System One decisions](#system-one-decisions-fast-path)).
+- `--default-risk <low|medium|high|none>` sets a local fallback risk for tools
+  whose server sends no MCP `annotations` (default `medium`), so the approval
+  gate has a seed even for thinner third-party servers. A server's own
+  annotations always win, and existing (human/learned) values are never
+  overwritten. Each server's `initialize` instructions are surfaced to the model
+  as clearly-labelled **untrusted** data, never as higher-priority directives.
 - `--list-tools` prints discovered tools and exits; `--db`/`--yaml` persist the
   store and the derived view of the agent's own store (the MCP server keeps its
   own).
