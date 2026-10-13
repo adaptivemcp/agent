@@ -1,5 +1,10 @@
 import { AdaptiveRuntime } from "@adaptivemcp/runtime";
-import { GraphTrackingMiddleware, ThinClient, type ToolHandler } from "@adaptivemcp/thin-client";
+import {
+  envelopeClassifier,
+  GraphTrackingMiddleware,
+  ThinClient,
+  type ToolHandler,
+} from "@adaptivemcp/thin-client";
 import { computeMetricDrift } from "@adaptivemcp/evaluation";
 import { GraphAnalyzer } from "@adaptivemcp/graph-analysis";
 import type { MemoryStore } from "@adaptivemcp/memory";
@@ -167,6 +172,10 @@ export class AgentRuntime implements AgentExecutor {
       requestApproval: (toolName) => this.approver(toolName),
       middleware: options.middleware ?? [],
       graphTracking: this.graphTracking,
+      // Real servers often signal logical failures in-band (a JSON envelope with
+      // `status: "error"`) rather than via MCP `isError`. Classify those as
+      // failures so learned failure rates are not corrupted by false successes.
+      classifyResult: envelopeClassifier(),
     });
   }
 

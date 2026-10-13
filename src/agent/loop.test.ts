@@ -807,4 +807,23 @@ describe("agent loop", () => {
 
     runtime.close();
   });
+
+  it("records an in-band error envelope as a failed execution", async () => {
+    const observations: Array<{ toolName: string; status: string }> = [];
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s26",
+      invoke: async () => ({ ok: true, output: { status: "error", error: "POLICY_DENIED" } }),
+      onExecuted: (observation) => observations.push(observation),
+    });
+    const spec: ToolSpec = { name: "qc_profile", inputSchema: { type: "object" }, serverName: "qc" };
+
+    const result = await runtime.execute({ id: "c1", name: "qc_profile", input: {} }, spec);
+
+    expect(result.ok).toBe(false);
+    expect(observations[0]?.status).toBe("failed");
+    expect(runtime.adaptive.memory.getTool("qc_profile", "qc")?.stats.failureRate).toBe(1);
+
+    runtime.close();
+  });
 });
