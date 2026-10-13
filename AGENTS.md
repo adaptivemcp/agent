@@ -111,6 +111,9 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `learnedProcedure()` — a repeated tool sequence for this workflow (planning).
 - `graphSignals()` / `review()` — graph-aware guardrails injected per step.
 - `onExecuted` option — report observations to governing servers.
+- `middleware` option — host middleware: output compression (headroom), and the
+  opt-in `jobPollingMiddleware` (`--await-jobs`) that awaits a long-running
+  tool's job handle via the server's `get_job_status`.
 
 ## Golden rules
 

@@ -197,6 +197,9 @@ pnpm dev -- \
   annotations always win, and existing (human/learned) values are never
   overwritten. Each server's `initialize` instructions are surfaced to the model
   as clearly-labelled **untrusted** data, never as higher-priority directives.
+- `--await-jobs` makes the agent poll a long-running tool's job handle to
+  completion (via the server's `get_job_status`) before the loop continues, for
+  asynchronous servers. `--await-jobs` is off by default.
 - `--list-tools` prints discovered tools and exits; `--db`/`--yaml` persist the
   store and the derived view of the agent's own store (the MCP server keeps its
   own).

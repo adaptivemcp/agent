@@ -18,6 +18,7 @@ import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
 import { ExitCode } from "./exit-codes.js";
+import { jobPollingMiddleware } from "./jobs.js";
 import type { AgentEvent, ChatModel } from "./types.js";
 
 interface CliArgs {
@@ -37,6 +38,8 @@ interface CliArgs {
   servers: string[];
   /** Local fallback risk for tools whose server ships no MCP annotations. */
   defaultRisk: "low" | "medium" | "high" | "none";
+  /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
+  awaitJobs: boolean;
   db?: string;
   yaml?: string;
   maxSteps?: number;
@@ -62,6 +65,7 @@ function parseArgs(argv: string[]): CliArgs {
     listTools: false,
     interactive: false,
     defaultRisk: "medium",
+    awaitJobs: false,
     noStream: false,
     autoApprove: false,
     context: true,
@@ -93,6 +97,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--no-ollama":
         args.noOllama = true;
+        break;
+      case "--await-jobs":
+        args.awaitJobs = true;
         break;
       case "--system1":
         args.system1 = true;
@@ -202,6 +209,7 @@ Options:
   --system1-model <id>          System One model (default: $SYSTEM1_MODEL, tev1:0.8b)
   --default-risk <level>        Risk for tools whose server sends no MCP annotations
                                 (low|medium|high|none; default medium)
+  --await-jobs                  Poll long-running tool jobs (job handles) to completion
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
@@ -338,6 +346,22 @@ async function main(): Promise<void> {
       if (spec.name.endsWith("report_observation")) {
         reportToolByServer.set(spec.serverName ?? "", spec.name);
       }
+    }
+
+    // Optional: await long-running jobs by polling the server's status tool
+    // before the loop continues (the handle's bare name is namespaced per server).
+    if (args.awaitJobs) {
+      middleware.push(
+        jobPollingMiddleware(
+          { callTool: (name, input) => tools.callTool(name, input) },
+          {
+            statusToolFor: (serverName) => {
+              const namespaced = `${sanitize(serverName ?? "")}_get_job_status`;
+              return specs.some((spec) => spec.name === namespaced) ? namespaced : undefined;
+            },
+          },
+        ),
+      );
     }
 
     const runtime = new AgentRuntime({

@@ -29,6 +29,12 @@ export {
 export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
 export { HttpToolset, type HttpToolsetOptions } from "./mcp/http.js";
 export { ExitCode } from "./exit-codes.js";
+export {
+  jobPollingMiddleware,
+  parseJobHandle,
+  type JobCaller,
+  type JobPollingOptions,
+} from "./jobs.js";
 export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
 export {
