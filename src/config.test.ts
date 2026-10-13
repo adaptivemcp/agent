@@ -47,6 +47,32 @@ describe("config", () => {
     expect(() => parseServer("fs=")).toThrow(/missing command/);
   });
 
+  it("parses the JSON server spec with cwd and env", () => {
+    const spec = JSON.stringify({
+      name: "qc",
+      command: "/opt/qc/.venv/bin/qc",
+      args: ["mcp"],
+      cwd: "/work/project",
+      env: { QC_SQLITE_PATH: "/work/demo.db" },
+    });
+    expect(parseServer(spec)).toEqual({
+      serverName: "qc",
+      command: "/opt/qc/.venv/bin/qc",
+      args: ["mcp"],
+      cwd: "/work/project",
+      env: { QC_SQLITE_PATH: "/work/demo.db" },
+    });
+  });
+
+  it("rejects malformed JSON server specs", () => {
+    expect(() => parseServer("{not json")).toThrow(/bad JSON/);
+    expect(() => parseServer("[1,2]")).toThrow(/JSON object/);
+    expect(() => parseServer('{"command":"qc"}')).toThrow(/'name'/);
+    expect(() => parseServer('{"name":"qc"}')).toThrow(/'command'/);
+    expect(() => parseServer('{"name":"qc","command":"qc","env":{"A":1}}')).toThrow(/strings/);
+    expect(() => parseServer('{"name":"qc","command":"qc","cwd":1}')).toThrow(/'cwd'/);
+  });
+
   it("resolves the sibling example server when it is built", () => {
     const server = exampleServerOptions();
     if (server === undefined) return; // fresh checkout without the sibling build

@@ -29,12 +29,19 @@ export const LOCAL_PROVIDER_DEFAULTS = {
 
 /** Parse a `name=command arg1 arg2` server spec. */
 export function parseServer(spec: string): StdioToolsetOptions {
-  const separator = spec.indexOf("=");
+  const trimmed = spec.trim();
+  // Rich form: a JSON object, for options the shorthand cannot express
+  // (per-server `cwd` and `env`), e.g.
+  //   {"name":"qc","command":"/path/.venv/bin/qc","args":["mcp"],
+  //    "cwd":"/path/to/project","env":{"QC_SQLITE_PATH":"/path/demo.db"}}
+  if (trimmed.startsWith("{")) return parseServerJson(trimmed);
+
+  const separator = trimmed.indexOf("=");
   if (separator <= 0) {
-    throw new Error(`invalid server spec "${spec}" (expected "name=command args")`);
+    throw new Error(`invalid server spec "${spec}" (expected "name=command args" or a JSON object)`);
   }
-  const serverName = spec.slice(0, separator).trim();
-  const tokens = spec
+  const serverName = trimmed.slice(0, separator).trim();
+  const tokens = trimmed
     .slice(separator + 1)
     .trim()
     .split(/\s+/)
@@ -42,6 +49,53 @@ export function parseServer(spec: string): StdioToolsetOptions {
   const command = tokens[0];
   if (!command) throw new Error(`invalid server spec "${spec}" (missing command)`);
   return { serverName, command, args: tokens.slice(1) };
+}
+
+/** Parse the JSON-object server spec (per-server `cwd`/`env`/`args`). */
+function parseServerJson(spec: string): StdioToolsetOptions {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(spec);
+  } catch (error) {
+    throw new Error(`invalid server spec (bad JSON): ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("invalid server spec (expected a JSON object)");
+  }
+  const obj = parsed as Record<string, unknown>;
+  const name = obj.name ?? obj.serverName;
+  if (typeof name !== "string" || name.trim() === "") {
+    throw new Error("invalid server spec (missing string 'name')");
+  }
+  if (typeof obj.command !== "string" || obj.command.trim() === "") {
+    throw new Error("invalid server spec (missing string 'command')");
+  }
+  const options: StdioToolsetOptions = { serverName: name.trim(), command: obj.command };
+
+  if (obj.args !== undefined) {
+    if (!Array.isArray(obj.args) || obj.args.some((arg) => typeof arg !== "string")) {
+      throw new Error("invalid server spec ('args' must be a string[])");
+    }
+    options.args = obj.args as string[];
+  }
+  if (obj.env !== undefined) {
+    if (typeof obj.env !== "object" || obj.env === null || Array.isArray(obj.env)) {
+      throw new Error("invalid server spec ('env' must be an object of strings)");
+    }
+    const env: Record<string, string> = {};
+    for (const [key, value] of Object.entries(obj.env)) {
+      if (typeof value !== "string") {
+        throw new Error("invalid server spec ('env' values must be strings)");
+      }
+      env[key] = value;
+    }
+    options.env = env;
+  }
+  if (obj.cwd !== undefined) {
+    if (typeof obj.cwd !== "string") throw new Error("invalid server spec ('cwd' must be a string)");
+    options.cwd = obj.cwd;
+  }
+  return options;
 }
 
 export function parseServers(specs: string[]): StdioToolsetOptions[] {

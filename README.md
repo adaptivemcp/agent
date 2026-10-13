@@ -172,7 +172,10 @@ pnpm dev -- \
 ```
 
 - `--server "name=command args"` is repeatable; tool names are always namespaced
-  `<server>_<tool>`.
+  `<server>_<tool>`. For a server that needs its own working directory or
+  environment (e.g. QC, which resolves `qc.toml` and secrets from `cwd`), pass a
+  JSON object instead:
+  `--server '{"name":"qc","command":"/path/.venv/bin/qc","args":["mcp"],"cwd":"/path/project","env":{"QC_SQLITE_PATH":"/path/demo.db"}}'`.
 - `--prompt "..."` runs a single turn and exits instead of starting the REPL.
 - `--no-stream` disables token streaming; `-v/--verbose` prints applied decoding
   and the derived view after a one-shot run.
