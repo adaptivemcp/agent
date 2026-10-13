@@ -29,6 +29,11 @@ pnpm demo          # vertical slice: loop -> telemetry -> evaluation -> derived 
 pnpm test          # offline: scripted model + in-memory toolset
 ```
 
+`pnpm test` stays offline. A separate **real-server** integration test drives
+the sibling [QueryCleaner/QC](../../qc) MCP server over stdio (it needs QC's
+`uv` venv); run it with `pnpm test:integration` (it is skipped unless
+`QC_MCP_INTEGRATION=1`).
+
 `pnpm demo` runs an in-memory toolset and a scripted model (no network, no API
 key), accumulates varied telemetry, then prints the derived `tools-metadata`
 view, the learned decoding recommendation, and the decoding actually applied to
