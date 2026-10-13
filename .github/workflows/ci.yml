@@ -1,0 +1,69 @@
+name: CI
+
+# The agent is a consumer of the sibling `adaptive-mcp` repo (all
+# `@adaptivemcp/*` deps are `link:../adaptive-mcp/packages/*`), so CI checks out
+# both repos side by side and builds the libraries before the agent.
+#
+# The adaptive-mcp checkout uses `secrets.ADAPTIVE_MCP_TOKEN` when set (needed
+# if that repo is private), falling back to the workflow token for public repos.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout agent
+        uses: actions/checkout@v4
+        with:
+          path: agent
+
+      - name: "Checkout adaptive-mcp (sibling link: dependency)"
+        uses: actions/checkout@v4
+        with:
+          repository: kemalelmizan/adaptive-mcp
+          path: adaptive-mcp
+          token: ${{ secrets.ADAPTIVE_MCP_TOKEN || github.token }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            agent/pnpm-lock.yaml
+            adaptive-mcp/pnpm-lock.yaml
+
+      - name: Install adaptive-mcp
+        working-directory: adaptive-mcp
+        run: pnpm install --frozen-lockfile
+
+      - name: Build adaptive-mcp libraries
+        working-directory: adaptive-mcp
+        run: pnpm -r --filter "./packages/*" run build
+
+      - name: Install agent
+        working-directory: agent
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: agent
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: agent
+        run: pnpm typecheck
+
+      - name: Build
+        working-directory: agent
+        run: pnpm build
+
+      - name: Test
+        working-directory: agent
+        run: pnpm test

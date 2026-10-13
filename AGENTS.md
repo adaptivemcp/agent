@@ -45,6 +45,12 @@ and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override bot
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
 
+**CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. Because every
+`@adaptivemcp/*` dependency is a `link:` into the sibling repo, CI checks out
+`adaptive-mcp` next to `agent/` (via `secrets.ADAPTIVE_MCP_TOKEN` when set,
+falling back to the workflow token for a public repo) and builds its packages
+before installing the agent.
+
 ## Architecture (seams)
 
 The agent is three seams plus a loop (`src/`):
