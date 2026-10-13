@@ -198,6 +198,8 @@ pnpm dev -- \
 - `--list-tools` prints discovered tools and exits; `--db`/`--yaml` persist the
   store and the derived view of the agent's own store (the MCP server keeps its
   own).
+- Exit codes are stable: `0` ok, `1` runtime error, `2` usage/no-server,
+  `3` provider/catalog config, `4` approval denied (`src/exit-codes.ts`).
 
 ## Architecture
 

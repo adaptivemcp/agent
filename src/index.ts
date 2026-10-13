@@ -27,6 +27,7 @@ export {
   type Toolset,
 } from "./mcp/toolset.js";
 export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
+export { ExitCode } from "./exit-codes.js";
 export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
 export {

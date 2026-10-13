@@ -16,6 +16,7 @@ import { exampleServerOptions, parseServer } from "./config.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
+import { ExitCode } from "./exit-codes.js";
 import type { AgentEvent, ChatModel } from "./types.js";
 
 interface CliArgs {
@@ -222,7 +223,15 @@ Options:
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  let args: CliArgs;
+  try {
+    args = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    printHelp();
+    process.exitCode = ExitCode.Usage;
+    return;
+  }
   if (args.help) {
     printHelp();
     return;
@@ -241,7 +250,7 @@ async function main(): Promise<void> {
         "       adaptive-mcp example server (pnpm --filter @adaptivemcp/examples build).\n",
     );
     printHelp();
-    process.exitCode = 1;
+    process.exitCode = ExitCode.Usage;
     return;
   }
 
@@ -263,7 +272,7 @@ async function main(): Promise<void> {
     catalog = loadCatalog({ file: args.models, env, discovered });
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
+    process.exitCode = ExitCode.Config;
     return;
   }
 
@@ -274,7 +283,7 @@ async function main(): Promise<void> {
       console.error(
         `error: unknown model "${args.model}". Available: ${catalog.list().map((m) => m.id).join(", ")}`,
       );
-      process.exitCode = 1;
+      process.exitCode = ExitCode.Config;
       return;
     }
   }
@@ -554,5 +563,5 @@ function stringify(value: unknown): string {
 
 main().catch((error: unknown) => {
   console.error(error);
-  process.exitCode = 1;
+  process.exitCode = ExitCode.Runtime;
 });
