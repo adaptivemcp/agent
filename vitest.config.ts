@@ -14,6 +14,11 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     environment: "node",
     reporters: ["dot"],
+    // The linked adaptive-mcp packages are consumed from their built `dist/`,
+    // which imports `node:sqlite`. Vite externalizes `node:` builtins from
+    // node_modules, bypassing the alias above; inlining the workspace packages
+    // routes them through Vite so the shim applies (and CI runs on Node 22).
+    server: { deps: { inline: [/@adaptivemcp\//] } },
     coverage: {
       provider: "v8",
       reporter: ["text-summary"],

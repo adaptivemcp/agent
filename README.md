@@ -32,8 +32,9 @@ pnpm test          # offline: scripted model + in-memory toolset
 `pnpm test` stays offline. A separate **real-server** integration test drives
 the sibling [QueryCleaner/QC](../../qc) MCP server over stdio (it needs QC's
 `uv` venv); run it with `pnpm test:integration` (it is skipped unless
-`QC_MCP_INTEGRATION=1`). CI runs it in the `integration-qc` job, which checks
-out the private QC repo via the `QC_REPO_TOKEN` secret.
+`QC_MCP_INTEGRATION=1`). CI runs it in the optional `integration-qc` job, which
+is enabled by setting the repository variable `QC_E2E_ENABLED=true` and the
+`QC_REPO_TOKEN` secret (read access to the private QC repo).
 
 `pnpm demo` runs an in-memory toolset and a scripted model (no network, no API
 key), accumulates varied telemetry, then prints the derived `tools-metadata`

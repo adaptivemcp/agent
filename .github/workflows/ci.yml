@@ -6,8 +6,9 @@ name: CI
 #
 # The adaptive-mcp checkout uses `secrets.ADAPTIVE_MCP_TOKEN` when set (needed
 # if that repo is private), falling back to the workflow token for public repos.
-# The optional `integration-qc` job additionally checks out `adaptivemcp/qc`
-# (private) via `secrets.QC_REPO_TOKEN`.
+# The optional `integration-qc` job drives the private `adaptivemcp/qc` repo; it
+# is gated on the `QC_E2E_ENABLED` repository variable and needs the
+# `QC_REPO_TOKEN` secret.
 
 on:
   push:
@@ -76,10 +77,11 @@ jobs:
 
   integration-qc:
     # The real-server e2e drives the sibling QueryCleaner/QC MCP server over
-    # stdio (src/mcp/qc-mcp.integration.test.ts). It needs the QC checkout (its
-    # uv venv) alongside the agent, plus the built adaptive-mcp libraries.
-    # The QC checkout uses `secrets.QC_REPO_TOKEN` when set (the repo is
-    # private), falling back to the workflow token.
+    # stdio (src/mcp/qc-mcp.integration.test.ts). The QC repo is **private**, so
+    # this job is opt-in: set the repository variable `QC_E2E_ENABLED=true` and
+    # a `QC_REPO_TOKEN` secret (read access to adaptivemcp/qc). Until then it is
+    # skipped so main stays green.
+    if: ${{ vars.QC_E2E_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout agent
@@ -96,14 +98,10 @@ jobs:
 
       - name: "Checkout QC (real MCP server under test)"
         uses: actions/checkout@v4
-        # Skipped harmlessly when the QC token is not configured: the job then
-        # finds no qc/ checkout and the e2e steps below are skipped, so main
-        # stays green until `QC_REPO_TOKEN` is added.
-        continue-on-error: true
         with:
           repository: adaptivemcp/qc
           path: qc
-          token: ${{ secrets.QC_REPO_TOKEN || github.token }}
+          token: ${{ secrets.QC_REPO_TOKEN }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -134,11 +132,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Set up QC (uv venv + qc entry point)
-        if: ${{ hashFiles('qc/pyproject.toml') != '' }}
         working-directory: qc
         run: uv sync --locked
 
       - name: Real QC MCP server e2e
-        if: ${{ hashFiles('qc/pyproject.toml') != '' }}
         working-directory: agent
         run: pnpm test:integration
