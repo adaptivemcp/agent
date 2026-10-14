@@ -34,8 +34,9 @@ export default defineConfig({
         "src/repl.ts",
       ],
       // Ratcheted just below the current aggregate (2026-10-14): a regression
-      // gate, not an aspiration. Raise as coverage improves.
-      thresholds: { statements: 77, branches: 73, functions: 73, lines: 77 },
+      // gate, not an aspiration. Leaves headroom for Node/V8 environment
+      // variance (local ~77.4%, CI ~76.9%). Raise as coverage improves.
+      thresholds: { statements: 76, branches: 73, functions: 73, lines: 76 },
     },
   },
 });
