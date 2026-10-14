@@ -32,6 +32,9 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     environment: "node",
     reporters: ["dot"],
+    // The sibling packages live outside this project root; without inlining,
+    // Vite externalizes them and the `node:sqlite` alias above is bypassed.
+    server: { deps: { inline: [/adaptive-mcp[\\/]packages[\\/]/] } },
     coverage: {
       provider: "v8",
       reporter: ["text-summary"],
