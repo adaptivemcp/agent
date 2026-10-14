@@ -14,5 +14,25 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     environment: "node",
     reporters: ["dot"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary"],
+      include: ["src/**/*.ts"],
+      exclude: [
+        "**/*.test.ts",
+        "**/index.ts",
+        "**/dist/**",
+        // Type-only modules.
+        "src/types.ts",
+        "src/models/types.ts",
+        // Process/IO entry points, exercised via the CLI/REPL and the
+        // integration tests rather than unit tests.
+        "src/cli.ts",
+        "src/repl.ts",
+      ],
+      // Ratcheted just below the current aggregate (2026-10-14): a regression
+      // gate, not an aspiration. Raise as coverage improves.
+      thresholds: { statements: 77, branches: 73, functions: 73, lines: 77 },
+    },
   },
 });

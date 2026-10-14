@@ -67,3 +67,7 @@ jobs:
       - name: Test
         working-directory: agent
         run: pnpm test
+
+      - name: Coverage gate
+        working-directory: agent
+        run: pnpm test:coverage

@@ -45,6 +45,11 @@ and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override bot
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
 
+**Coverage gate.** `pnpm test:coverage` enforces ratcheted v8 thresholds
+(`vitest.config.ts`); CI runs it. Type-only modules and the CLI/REPL entry points
+are excluded (the latter are exercised via the integration tests); the gate
+covers the library core and adapters.
+
 **CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. Because every
 `@adaptivemcp/*` dependency is a `link:` into the sibling repo, CI checks out
 `adaptive-mcp` next to `agent/` (via `secrets.ADAPTIVE_MCP_TOKEN` when set,

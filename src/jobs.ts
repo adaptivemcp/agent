@@ -62,7 +62,7 @@ export function parseJobHandle(
   const id = record[idField];
   const status = record[statusField];
   if (typeof id !== "string" || id.length === 0) return undefined;
-  if (typeof status !== "string") return undefined;
+  if (typeof status !== "string" || status.length === 0) return undefined;
   return { id, status };
 }
 
