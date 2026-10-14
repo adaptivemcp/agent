@@ -54,7 +54,9 @@ covers the library core and adapters.
 `@adaptivemcp/*` dependency is a `link:` into the sibling repo, CI checks out
 `adaptive-mcp` next to `agent/` (via `secrets.ADAPTIVE_MCP_TOKEN` when set,
 falling back to the workflow token for a public repo) and builds its packages
-before installing the agent.
+before installing the agent. CI runs **Node 26** (the documented recommendation),
+where `node:sqlite` is available without a flag; the optional `integration-qc`
+job is gated on the `QC_E2E_ENABLED` variable + `QC_REPO_TOKEN` secret.
 
 ## Architecture (seams)
 

@@ -6,6 +6,9 @@ name: CI
 #
 # The adaptive-mcp checkout uses `secrets.ADAPTIVE_MCP_TOKEN` when set (needed
 # if that repo is private), falling back to the workflow token for public repos.
+# The optional `integration-qc` job drives the private `adaptivemcp/qc` repo; it
+# is gated on the `QC_E2E_ENABLED` repository variable and needs the
+# `QC_REPO_TOKEN` secret.
 
 on:
   push:
@@ -34,7 +37,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
           cache: pnpm
           cache-dependency-path: |
             agent/pnpm-lock.yaml
@@ -71,3 +74,67 @@ jobs:
       - name: Coverage gate
         working-directory: agent
         run: pnpm test:coverage
+
+  integration-qc:
+    # The real-server e2e drives the sibling QueryCleaner/QC MCP server over
+    # stdio (src/mcp/qc-mcp.integration.test.ts). The QC repo is **private**, so
+    # this job is opt-in: set the repository variable `QC_E2E_ENABLED=true` and
+    # a `QC_REPO_TOKEN` secret (read access to adaptivemcp/qc). Until then it is
+    # skipped so main stays green.
+    if: ${{ vars.QC_E2E_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout agent
+        uses: actions/checkout@v4
+        with:
+          path: agent
+
+      - name: "Checkout adaptive-mcp (sibling link: dependency)"
+        uses: actions/checkout@v4
+        with:
+          repository: kemalelmizan/adaptive-mcp
+          path: adaptive-mcp
+          token: ${{ secrets.ADAPTIVE_MCP_TOKEN || github.token }}
+
+      - name: "Checkout QC (real MCP server under test)"
+        uses: actions/checkout@v4
+        with:
+          repository: adaptivemcp/qc
+          path: qc
+          token: ${{ secrets.QC_REPO_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            agent/pnpm-lock.yaml
+            adaptive-mcp/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install adaptive-mcp
+        working-directory: adaptive-mcp
+        run: pnpm install --frozen-lockfile
+
+      - name: Build adaptive-mcp libraries
+        working-directory: adaptive-mcp
+        run: pnpm -r --filter "./packages/*" run build
+
+      - name: Install agent
+        working-directory: agent
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up QC (uv venv + qc entry point)
+        working-directory: qc
+        run: uv sync --locked
+
+      - name: Real QC MCP server e2e
+        working-directory: agent
+        run: pnpm test:integration
