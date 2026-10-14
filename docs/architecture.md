@@ -29,9 +29,9 @@
 ├───────────────────────────────┼──────────────────────────────────┤
 │ Toolset seam                  │  @adaptivemcp/* libraries         │
 │  StdioToolset (MCP SDK)       │  spec/memory/telemetry/evaluation │
-│  InMemoryToolset              │  extension/routing/orchestration  │
-│  AggregateToolset             │  approval/thin-client/middleware  │
-│                               │  graph-analysis                   │
+│  HttpToolset (MCP SDK)        │  extension/routing/orchestration  │
+│  InMemoryToolset              │  approval/thin-client/middleware  │
+│  AggregateToolset             │  graph-analysis                   │
 └───────────────────────────────┴──────────────────────────────────┘
 ```
 
@@ -154,6 +154,54 @@ disables selection.
   `dev.adaptivemcp://tools-metadata`; `AgentRuntime.applyServerMetadata` applies
   the published annotation/`require_approval`/budget as a floor (never overriding
   a human or learned value). `/policy` shows what is in effect.
+
+## Transports, resolution & robustness
+
+- **Transports.** `StdioToolset` (local child process) and `HttpToolset`
+  (Streamable HTTP, with static `headers` for a bearer token) both implement
+  `ResourceToolset` (`listTools`/`callTool`/`listResources`/`readResource`/
+  `instructions`). `AggregateToolset` namespaces several servers into one flat
+  tool list. `--server` accepts the `name=command args` shorthand or a JSON
+  object: `{"name","command","args","cwd","env"}` for stdio, or
+  `{"name","transport":"http","url","headers"}` for HTTP.
+- **Result classification.** Real servers often report *logical* failures
+  in-band (a JSON envelope with `status:"error"`, as an object or JSON text)
+  rather than via the MCP `isError` flag. `AgentRuntime` passes
+  `envelopeClassifier()` to `ThinClient.classifyResult`, so such outcomes are
+  recorded as failures — and can trigger the retry policy — instead of false
+  successes. See `@adaptivemcp/thin-client`.
+- **Server instructions & local risk.** `StdioToolset.instructions()` reads the
+  server's `initialize` instructions, which the CLI adds to the system prompt as
+  clearly-labelled untrusted data. `seedToolAnnotations(specs, { defaultRisk })`
+  seeds static risk from MCP annotations, falling back to `--default-risk`
+  (default `medium`) for servers that ship none.
+- **Long-running jobs.** `jobPollingMiddleware` (opt-in `--await-jobs`) detects a
+  job handle (`job_id` plus a running status) in a tool result and polls the
+  server's `get_job_status` until terminal, replacing the output (a terminal
+  failure is recorded as a failure).
+- **Exit codes.** The CLI uses stable codes (`src/exit-codes.ts`): `0` ok,
+  `1` runtime, `2` usage/no-server, `3` provider/catalog config, `4` approval
+  denied.
+
+## System One decisions
+
+An optional fast decision layer (`src/decision/`) in front of the chat model.
+`SystemOneClient` / `OllamaSystemOneBackend` call Ollama's `/v1/systemone`
+(`DecisionBackend` is the seam for remote tiers); `SystemOneAdvisor` turns the
+learned metadata plus the request into one verdict (model / tool intent /
+decoding), declining when the backend fails or confidence is low. `runAgent`
+consumes it via `decide` (`DecisionProvider`); `AgentRuntime.systemOneProvider`
+builds it (`--system1`; `/decision` shows the last verdict). It is not a
+`ChatModel` and never touches the chat path.
+
+## Model catalog
+
+`src/models/` holds the catalog: built-in integrations (openai-compatible,
+anthropic, google) plus Ollama auto-discovery (`GET /api/tags` → `ollama-<slug>`;
+`--no-ollama` disables). Several keys for the same provider/model (`$NAME`,
+`$NAME_2`, …) pool into a `PooledChatModel` that round-robins and cools a failing
+key down. `ModelCatalog.routingOptions()` feeds the `Router`, so a learned
+per-tool model recommendation references a runnable model.
 
 ## Decisions (2026-09-28)
 
