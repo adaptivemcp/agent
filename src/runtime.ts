@@ -133,6 +133,27 @@ export interface SystemOneProviderOptions {
   onError?: (error: unknown) => void;
 }
 
+const RISK_ORDER: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
+
+/**
+ * A risk level read out of a server-published policy document. The document is
+ * untrusted input, so an unrecognised value is ignored rather than stored.
+ */
+function asRiskLevel(value: unknown): RiskLevel | undefined {
+  return typeof value === "string" && value in RISK_ORDER ? (value as RiskLevel) : undefined;
+}
+
+/** The higher of two risk levels; absent and unknown values simply lose. */
+function maxRisk(...levels: Array<RiskLevel | undefined>): RiskLevel | undefined {
+  return levels.reduce<RiskLevel | undefined>(
+    (best, level) =>
+      level !== undefined && (best === undefined || RISK_ORDER[level] > RISK_ORDER[best])
+        ? level
+        : best,
+    undefined,
+  );
+}
+
 /**
  * The agent's bridge into the Adaptive MCP adaptation loop.
  *
@@ -285,8 +306,11 @@ export class AgentRuntime implements AgentExecutor {
     for (const tool of doc.tools ?? []) {
       const existing = this.adaptive.memory.getTool(tool.name, options.serverName);
       const requireApproval = tool.annotation?.require_approval === true;
-      const risk =
-        (tool.annotation?.risk as RiskLevel | undefined) ?? (requireApproval ? "high" : undefined);
+      const published = asRiskLevel(tool.annotation?.risk);
+      // A suggestion to confirm only means something if the risk agrees, so a
+      // contradictory pair (`medium` + `require_approval`) must not *lower* the
+      // implied gate: hosts gate on risk, and server policy is a floor.
+      const risk = requireApproval ? maxRisk(published, "high") : published;
 
       const patch: Annotation = { toolName: tool.name, serverName: options.serverName };
       let changed = false;

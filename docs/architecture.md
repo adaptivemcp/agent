@@ -150,10 +150,15 @@ disables selection.
   hourly metric cell to the lifetime cell (`/drift`); `Evaluator.evaluateCooccurrence`
   surfaces tools that cluster in the same session, injected into the learned
   context ("often with …").
-- **Server governance.** `StdioToolset` advertises the extension and reads
-  `dev.adaptivemcp://tools-metadata`; `AgentRuntime.applyServerMetadata` applies
-  the published annotation/`require_approval`/budget as a floor (never overriding
-  a human or learned value). `/policy` shows what is in effect.
+- **Server governance.** `StdioToolset`/`HttpToolset` advertise the extension
+  and read `dev.adaptivemcp://tools-metadata`; `AgentRuntime.applyServerMetadata`
+  applies the published annotation/`require_approval`/budget as a floor (never
+  overriding a human or learned value). Two rules keep "floor" honest: a
+  `require_approval` suggestion implies at least `high` risk even if the
+  document pairs it with a lower one (hosts gate on risk, so a contradictory
+  pair cannot lower the gate), and an unrecognised risk value from that
+  untrusted document is ignored rather than stored. `/policy` shows what is in
+  effect.
 
 ## Transports, resolution & robustness
 
