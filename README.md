@@ -56,12 +56,12 @@ pnpm dev
 
 Defaults (each overridable by a flag or an `AI_*` env var):
 
-| Setting | Default |
-| --- | --- |
-| Model endpoint | `http://127.0.0.1:9931/v1` (a local `llama-server`) |
-| API key | `$AI_API_KEY`, else `$LLAMA_API_KEY` |
-| Model id | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field) |
-| MCP server | the sibling `adaptive-mcp` example server (`examples/dist/server.js`) |
+| Setting        | Default                                                                 |
+| -------------- | ----------------------------------------------------------------------- |
+| Model endpoint | `http://127.0.0.1:9931/v1` (a local `llama-server`)                     |
+| API key        | `$AI_API_KEY`, else `$LLAMA_API_KEY`                                    |
+| Model id       | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field) |
+| MCP server     | the sibling `adaptive-mcp` example server (`examples/dist/server.js`)   |
 
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
@@ -104,13 +104,13 @@ back to a default until there is enough signal.
 
 Built-in integrations (only those whose key is set become active):
 
-| id | provider | default model | key |
-| --- | --- | --- | --- |
-| `local` | OpenAI-compatible (llama.cpp) | `Qwen/Qwen3-8B` | `LLAMA_API_KEY` / `AI_API_KEY` |
-| `openai` | OpenAI-compatible | `gpt-4o-mini` | `OPENAI_API_KEY` |
-| `anthropic` | Anthropic | `claude-3-5-haiku-latest` | `ANTHROPIC_API_KEY` |
-| `google` | Google | `gemini-2.5-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` |
-| `ollama-<model>` | Ollama (auto-discovered) | each pulled model | none (local) |
+| id               | provider                      | default model             | key                            |
+| ---------------- | ----------------------------- | ------------------------- | ------------------------------ |
+| `local`          | OpenAI-compatible (llama.cpp) | `Qwen/Qwen3-8B`           | `LLAMA_API_KEY` / `AI_API_KEY` |
+| `openai`         | OpenAI-compatible             | `gpt-4o-mini`             | `OPENAI_API_KEY`               |
+| `anthropic`      | Anthropic                     | `claude-3-5-haiku-latest` | `ANTHROPIC_API_KEY`            |
+| `google`         | Google                        | `gemini-2.5-flash`        | `GOOGLE_GENERATIVE_AI_API_KEY` |
+| `ollama-<model>` | Ollama (auto-discovered)      | each pulled model         | none (local)                   |
 
 - **Ollama (auto-discovered).** On startup the agent queries a running Ollama
   server's `GET /api/tags` (default `http://127.0.0.1:11434`, override with
@@ -119,11 +119,11 @@ Built-in integrations (only those whose key is set become active):
   server is down the catalog simply starts without those entries. `--no-ollama`
   disables it.
 - **Key pooling.** Several keys for the same provider/model (e.g.
-  `OPENAI_API_KEY`, `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3`) become a *key pool*:
+  `OPENAI_API_KEY`, `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3`) become a _key pool_:
   one catalog entry whose `ChatModel` is a `PooledChatModel` that round-robins
   across the keys and fails over to the next one, cooling a key down, when a call
   throws (rate limit, auth, transient error). `$NAME` and `$NAME_2…` are pooled;
-  *alternative* env names (e.g. `AI_API_KEY` vs `LLAMA_API_KEY`) are not — the
+  _alternative_ env names (e.g. `AI_API_KEY` vs `LLAMA_API_KEY`) are not — the
   first set one wins. `/models` shows `(N keys pooled)`.
 - `--model <id>` pins one catalog model (turns adaptive selection off).
 - `/models` lists the active integrations; the REPL prefixes each turn with the
@@ -134,12 +134,25 @@ Built-in integrations (only those whose key is set become active):
 {
   "default": "local-cheap",
   "models": [
-    { "id": "local-cheap", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
-      "baseURL": "http://127.0.0.1:9931/v1", "apiKeyEnv": "LLAMA_API_KEY",
-      "costWeight": 1, "latencyWeight": 1, "default": true },
-    { "id": "local-fast", "provider": "openai-compatible", "model": "Qwen/Qwen3-8B",
-      "baseURL": "http://127.0.0.1:9931/v1", "apiKeyEnv": "LLAMA_API_KEY",
-      "costWeight": 2, "latencyWeight": 0.5 }
+    {
+      "id": "local-cheap",
+      "provider": "openai-compatible",
+      "model": "Qwen/Qwen3-8B",
+      "baseURL": "http://127.0.0.1:9931/v1",
+      "apiKeyEnv": "LLAMA_API_KEY",
+      "costWeight": 1,
+      "latencyWeight": 1,
+      "default": true
+    },
+    {
+      "id": "local-fast",
+      "provider": "openai-compatible",
+      "model": "Qwen/Qwen3-8B",
+      "baseURL": "http://127.0.0.1:9931/v1",
+      "apiKeyEnv": "LLAMA_API_KEY",
+      "costWeight": 2,
+      "latencyWeight": 0.5
+    }
   ]
 }
 ```
@@ -151,7 +164,7 @@ threshold for demos.
 
 ### System One decisions (fast path)
 
-`--system1` adds a *System-1* decision layer in front of the router: one cheap,
+`--system1` adds a _System-1_ decision layer in front of the router: one cheap,
 local call to an Ollama System One model
 ([`/v1/systemone`](https://docs.ollama.com/api/systemone)) that turns the learned
 Adaptive MCP metadata (tool reliability, annotations) plus the user's request
@@ -166,6 +179,12 @@ pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
 ```
 
 - `--system1-model <id>` selects the decision model (`$SYSTEM1_MODEL`).
+- `--system1-backend <ollama|openai>` selects the tier (`$SYSTEM1_BACKEND`,
+  default `ollama`): the local Ollama endpoint above, or the remote
+  OpenAI-compatible tier below. The `openai` tier needs a model — pass
+  `--system1-model` or set `$SYSTEM1_MODEL` (there is no guessed default, since
+  a wrong hosted model name is a runtime 404); a bad tier or missing model
+  fails fast with exit code 3.
 - The backend URL reuses `$OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`).
 - `/decision` shows the last decision (model, tools, decoding, confidence,
   rationale).
@@ -175,18 +194,23 @@ pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
 one prompt to any OpenAI-compatible `/chat/completions` endpoint (a hosted
 `gpt-4o-mini`, a self-hosted vLLM/llama-server, or a gateway) and coerces the
 JSON reply back into the `SystemOneResponse` shape, so hosts without a local
-`tev1` model can still use the fast path. Inject it (or any backend) via
-`AgentRuntime.systemOneProvider(catalog, { backend })`; the injected backend
-overrides the built-in Ollama construction entirely.
+`tev1` model can still use the fast path. From the CLI:
+
+```bash
+pnpm dev -- --system1 --system1-backend openai --system1-model gpt-4o-mini
+```
+
+or inject it (or any backend) programmatically — the injected backend
+overrides the built-in Ollama construction entirely:
 
 ```ts
 import { OpenAiSystemOneBackend } from "@adaptivemcp/agent";
 
 const provider = runtime.systemOneProvider(catalog, {
   backend: new OpenAiSystemOneBackend({
-    model: "gpt-4o-mini",        // required
-    baseURL: process.env.SYSTEM1_BASE_URL,  // defaults to $SYSTEM1_BASE_URL, else OpenAI
-    apiKey: process.env.SYSTEM1_API_KEY,    // defaults to $SYSTEM1_API_KEY, else $OPENAI_API_KEY
+    model: "gpt-4o-mini", // required
+    baseURL: process.env.SYSTEM1_BASE_URL, // defaults to $SYSTEM1_BASE_URL, else OpenAI
+    apiKey: process.env.SYSTEM1_API_KEY, // defaults to $SYSTEM1_API_KEY, else $OPENAI_API_KEY
   }),
 });
 ```
@@ -223,8 +247,9 @@ pnpm dev -- \
 - `AI_BASE_URL` accepts any OpenAI-compatible endpoint (OpenAI, Ollama, llama.cpp,
   vLLM, ...).
 - `--no-ollama` skips Ollama model auto-discovery; `--system1` /
-  `--system1-model <id>` enable and configure the System One decision layer
-  (see [System One decisions](#system-one-decisions-fast-path)).
+  `--system1-model <id>` / `--system1-backend <ollama|openai>` enable and
+  configure the System One decision layer (see
+  [System One decisions](#system-one-decisions-fast-path)).
 - `--default-risk <low|medium|high|none>` sets a local fallback risk for tools
   whose server sends no MCP `annotations` (default `medium`), so the approval
   gate has a seed even for thinner third-party servers. A server's own

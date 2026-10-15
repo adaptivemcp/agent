@@ -18,218 +18,10 @@ import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
 import { ExitCode } from "./exit-codes.js";
+import { parseArgs, printHelp, system1BackendFor, type CliArgs } from "./cli-args.js";
+import type { DecisionBackend } from "./decision/systemone.js";
 import { jobPollingMiddleware } from "./jobs.js";
 import type { AgentEvent, ChatModel } from "./types.js";
-
-interface CliArgs {
-  prompt?: string;
-  /** Catalog id to pin (disables adaptive model selection). */
-  model?: string;
-  /** Catalog file for extra/overridden integrations. */
-  models?: string;
-  /** Disable Ollama /api/tags auto-discovery. */
-  noOllama: boolean;
-  /** Enable the System One fast decision layer. */
-  system1: boolean;
-  /** System One model id (default: $SYSTEM1_MODEL, else tev1:0.8b). */
-  system1Model?: string;
-  baseUrl?: string;
-  apiKey?: string;
-  servers: string[];
-  /** Local fallback risk for tools whose server ships no MCP annotations. */
-  defaultRisk: "low" | "medium" | "high" | "none";
-  /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
-  awaitJobs: boolean;
-  db?: string;
-  yaml?: string;
-  maxSteps?: number;
-  routerMinInvocations?: number;
-  session?: string;
-  history?: string;
-  workflow?: string;
-  compress: boolean;
-  report: boolean;
-  serverPolicy: boolean;
-  listTools: boolean;
-  interactive: boolean;
-  noStream: boolean;
-  autoApprove: boolean;
-  context: boolean;
-  verbose: boolean;
-  help: boolean;
-}
-
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    servers: [],
-    listTools: false,
-    interactive: false,
-    defaultRisk: "medium",
-    awaitJobs: false,
-    noStream: false,
-    autoApprove: false,
-    context: true,
-    compress: false,
-    report: false,
-    serverPolicy: true,
-    noOllama: false,
-    system1: false,
-    verbose: false,
-    help: false,
-  };
-  for (let i = 0; i < argv.length; i += 1) {
-    const flag = argv[i];
-    const next = (): string => {
-      const value = argv[i + 1];
-      if (value === undefined) throw new Error(`missing value for ${flag}`);
-      i += 1;
-      return value;
-    };
-    switch (flag) {
-      case "--prompt":
-        args.prompt = next();
-        break;
-      case "--model":
-        args.model = next();
-        break;
-      case "--models":
-        args.models = next();
-        break;
-      case "--no-ollama":
-        args.noOllama = true;
-        break;
-      case "--await-jobs":
-        args.awaitJobs = true;
-        break;
-      case "--system1":
-        args.system1 = true;
-        break;
-      case "--system1-model":
-        args.system1Model = next();
-        break;
-      case "--base-url":
-        args.baseUrl = next();
-        break;
-      case "--api-key":
-        args.apiKey = next();
-        break;
-      case "--server":
-        args.servers.push(next());
-        break;
-      case "--default-risk": {
-        const value = next();
-        if (value !== "low" && value !== "medium" && value !== "high" && value !== "none") {
-          throw new Error(`--default-risk expects low|medium|high|none, got "${value}"`);
-        }
-        args.defaultRisk = value;
-        break;
-      }
-      case "--db":
-        args.db = next();
-        break;
-      case "--yaml":
-        args.yaml = next();
-        break;
-      case "--max-steps":
-        args.maxSteps = Number(next());
-        break;
-      case "--router-min-invocations":
-        args.routerMinInvocations = Number(next());
-        break;
-      case "--session":
-        args.session = next();
-        break;
-      case "--history":
-        args.history = next();
-        break;
-      case "--workflow":
-        args.workflow = next();
-        break;
-      case "--compress":
-        args.compress = true;
-        break;
-      case "--report":
-        args.report = true;
-        break;
-      case "--no-server-policy":
-        args.serverPolicy = false;
-        break;
-      case "--list-tools":
-        args.listTools = true;
-        break;
-      case "--interactive":
-      case "-i":
-        args.interactive = true;
-        break;
-      case "--no-stream":
-        args.noStream = true;
-        break;
-      case "--yes":
-      case "-y":
-        args.autoApprove = true;
-        break;
-      case "--no-context":
-        args.context = false;
-        break;
-      case "--verbose":
-      case "-v":
-        args.verbose = true;
-        break;
-      case "--help":
-      case "-h":
-        args.help = true;
-        break;
-      default:
-        if (flag !== undefined && !flag.startsWith("--") && args.prompt === undefined) args.prompt = flag;
-        break;
-    }
-  }
-  return args;
-}
-
-function printHelp(): void {
-  console.log(`adaptivemcp-agent
-
-Usage:
-  adaptivemcp-agent [--prompt "..."] [--server "name=command args"] [options]
-
-  With no --prompt, starts an interactive REPL (streaming, multi-turn).
-  Adaptive MCP picks the model per tool from the model catalog unless --model
-  pins one.
-
-Options:
-  --server <name=command args>  MCP server over stdio (repeatable)
-                                (default: the sibling adaptive-mcp example server)
-  --prompt <text>               One-shot prompt instead of the interactive REPL
-  -i, --interactive             Force the interactive REPL
-  --model <id>                  Pin one catalog model (disables adaptive selection)
-  --models <file>               Catalog file of model integrations (JSON)
-  --no-ollama                   Don't auto-discover models from a local Ollama
-  --system1                     Enable the System One fast decision layer (Ollama)
-  --system1-model <id>          System One model (default: $SYSTEM1_MODEL, tev1:0.8b)
-  --default-risk <level>        Risk for tools whose server sends no MCP annotations
-                                (low|medium|high|none; default medium)
-  --await-jobs                  Poll long-running tool jobs (job handles) to completion
-  --base-url <url>              Override the local integration's base URL
-  --api-key <key>               Override the local integration's API key
-  --no-stream                   Disable token streaming
-  -y, --yes                     Auto-approve require_confirmation tools (no prompt)
-  --no-context                  Don't inject learned tool context into the prompt
-  -v, --verbose                 Show decoding, graph, and view after a one-shot run
-  --db <path>                   SQLite store path (default: in-memory)
-  --yaml <path>                 Write the derived tools-metadata view here
-  --max-steps <n>               Max agent steps per turn (default: 8)
-  --router-min-invocations <n>  Invocations before the router trusts stats (default: 10)
-  --session <id>                Stable session id (accumulate graph/stats across runs)
-  --history <file>              Persist/restore the conversation (JSON)
-  --workflow <id>               Workflow id for cross-session graph/pattern learning
-  --compress                    Compress large tool output via the headroom MCP server
-  --report                      Report observations to servers exposing report_observation
-  --no-server-policy            Don't read/apply the server's tools-metadata policy
-  --list-tools                  List discovered tools and exit
-  -h, --help                    Show this help
-`);
-}
 
 async function main(): Promise<void> {
   let args: CliArgs;
@@ -255,7 +47,7 @@ async function main(): Promise<void> {
         : [];
   if (serverSpecs.length === 0) {
     console.error(
-      "error: no MCP server. Pass --server \"name=command args\", or build the sibling\n" +
+      'error: no MCP server. Pass --server "name=command args", or build the sibling\n' +
         "       adaptive-mcp example server (pnpm --filter @adaptivemcp/examples build).\n",
     );
     printHelp();
@@ -290,13 +82,32 @@ async function main(): Promise<void> {
     pinned = catalog.get(args.model);
     if (!pinned) {
       console.error(
-        `error: unknown model "${args.model}". Available: ${catalog.list().map((m) => m.id).join(", ")}`,
+        `error: unknown model "${args.model}". Available: ${catalog
+          .list()
+          .map((m) => m.id)
+          .join(", ")}`,
       );
       process.exitCode = ExitCode.Config;
       return;
     }
   }
   const defaultModel = pinned ?? catalog.defaultModel();
+
+  // Fast System-1 decision backend, resolved before any toolset spawns so a
+  // bad tier or a missing remote model fails fast as config (exit 3) instead
+  // of at the first decision. `undefined` means the local Ollama tier, whose
+  // construction stays owned by `systemOneProvider`.
+  const system1Enabled = args.system1 && !pinned;
+  let system1Backend: DecisionBackend | undefined;
+  if (system1Enabled) {
+    try {
+      system1Backend = system1BackendFor(args, env);
+    } catch (error) {
+      console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = ExitCode.Config;
+      return;
+    }
+  }
 
   const toolsets: ResourceToolset[] = serverSpecs.map((spec) =>
     isHttpServerSpec(spec)
@@ -322,7 +133,8 @@ async function main(): Promise<void> {
           content: [
             {
               type: "text",
-              text: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+              text:
+                typeof result.output === "string" ? result.output : JSON.stringify(result.output),
             },
           ],
         };
@@ -464,11 +276,11 @@ async function main(): Promise<void> {
     const selectModel = pinned ? undefined : runtime.modelProvider(catalog);
     const capabilities = defaultModel.capabilities ?? AI_SDK_CAPABILITIES;
     const decoding = runtime.decodingProvider(capabilities);
-    // Fast System-1 decision layer in front of the router (opt-in).
-    const decide =
-      args.system1 && !pinned
-        ? runtime.systemOneProvider(catalog, { model: args.system1Model })
-        : undefined;
+    // Fast System-1 decision layer in front of the router (opt-in); the tier
+    // was resolved (and validated) before any server spawned.
+    const decide = system1Enabled
+      ? runtime.systemOneProvider(catalog, { model: args.system1Model, backend: system1Backend })
+      : undefined;
 
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
@@ -575,7 +387,9 @@ function renderOneShot(event: AgentEvent, verbose: boolean): void {
       console.log(`→ ${event.call.name}(${JSON.stringify(event.call.input ?? {})})`);
       break;
     case "tool_result":
-      console.log(event.result.ok ? `✓ ${stringify(event.result.output)}` : `✗ ${event.result.error}`);
+      console.log(
+        event.result.ok ? `✓ ${stringify(event.result.output)}` : `✗ ${event.result.error}`,
+      );
       break;
   }
 }

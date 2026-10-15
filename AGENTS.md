@@ -62,11 +62,11 @@ job is gated on the `QC_E2E_ENABLED` variable + `QC_REPO_TOKEN` secret.
 
 The agent is three seams plus a loop (`src/`):
 
-| Seam | Interface | Implementations |
-| --- | --- | --- |
-| Model | `ChatModel` (`src/types.ts`) | `AiSdkModel` (Vercel AI SDK, OpenAI-compatible; `step` + token streaming), `ScriptedModel` (tests/demo) |
+| Seam      | Interface                        | Implementations                                                                                                                                                           |
+| --------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model     | `ChatModel` (`src/types.ts`)     | `AiSdkModel` (Vercel AI SDK, OpenAI-compatible; `step` + token streaming), `ScriptedModel` (tests/demo)                                                                   |
 | Transport | `Toolset` (`src/mcp/toolset.ts`) | `StdioToolset` (official MCP SDK, stdio), `HttpToolset` (official MCP SDK, Streamable HTTP), `InMemoryToolset` (tests/demo), `AggregateToolset` (namespaced multi-server) |
-| Execution | `AgentExecutor` (`src/types.ts`) | `AgentRuntime` (`src/runtime.ts`) |
+| Execution | `AgentExecutor` (`src/types.ts`) | `AgentRuntime` (`src/runtime.ts`)                                                                                                                                         |
 
 `runAgent` (`src/agent/loop.ts`) is the tool-calling loop: ask the model for one
 step, execute any tool calls through the executor, append the results, repeat
@@ -76,7 +76,7 @@ until no tool calls or `maxSteps`. Each step's model can be chosen by
 (`DecisionProvider`, e.g. `AgentRuntime.systemOneProvider`) runs first and may
 override the step's model, tool subset, and decoding.
 
-The model catalog (`src/models/`) is the *pool of resources*: it auto-discovers
+The model catalog (`src/models/`) is the _pool of resources_: it auto-discovers
 pulled Ollama models from `GET /api/tags` (`src/models/ollama.ts`) and pools
 several keys for the same provider/model (`OPENAI_API_KEY`, `OPENAI_API_KEY_2`,
 …) into one `PooledChatModel` (`src/models/pool.ts`) that fails over between
@@ -105,7 +105,10 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   wired behind the same `DecisionBackend` seam: the local Ollama one
   (`/v1/systemone`, `tev1:0.8b` by default) and a remote OpenAI-compatible one
   (`OpenAiSystemOneBackend`, tier 1) that prompts any `/chat/completions`
-  endpoint. Pass `backend` to inject either (or a test double). The opt-in live
+  endpoint. The CLI selects the tier with `--system1-backend ollama|openai`
+  (`$SYSTEM1_BACKEND`, default `ollama`; the `openai` tier needs
+  `--system1-model`/`$SYSTEM1_MODEL` and fails fast as config/exit 3 without
+  it). Pass `backend` to inject either (or a test double). The opt-in live
   check is `pnpm test:system1` (`SYSTEM1_LIVE=1`, skipped when the backend is
   absent). `lastDecisionSummary()` powers the REPL's `/decision`.
 - `seedToolAnnotations(specs, { defaultRisk })` — seed static risk from standard

@@ -37,9 +37,7 @@ export interface SystemOneScoreQuestion {
 }
 
 export type SystemOneQuestion =
-  | SystemOneChoiceQuestion
-  | SystemOneNoulQuestion
-  | SystemOneScoreQuestion;
+  SystemOneChoiceQuestion | SystemOneNoulQuestion | SystemOneScoreQuestion;
 
 export interface SystemOneChoiceAnswer {
   type: "choice";
@@ -183,10 +181,12 @@ export class SystemOneClient {
 /**
  * A pluggable System One decision backend. Two are wired today — the local
  * Ollama backend (`tev1:0.8b` by default) and a remote, hosted backend that
- * speaks the OpenAI-compatible chat-completions shape (`gpt-4o-mini` by
- * default). A `tier` orders them so a host can try cheap/local first and fall
- * back to remote; every tier answers through the same `answer()` contract, so
- * `SystemOneAdvisor` never learns which one produced a verdict.
+ * speaks the OpenAI-compatible chat-completions shape (its model is an explicit
+ * option, e.g. `gpt-4o-mini`; there is no guessed default, because a wrong
+ * hosted model name is a runtime 404 on a remote endpoint). A `tier` orders
+ * them so a host can try cheap/local first and fall back to remote; every tier
+ * answers through the same `answer()` contract, so `SystemOneAdvisor` never
+ * learns which one produced a verdict.
  */
 export interface DecisionBackend {
   readonly id: string;
@@ -212,10 +212,7 @@ export class OllamaSystemOneBackend implements DecisionBackend {
     this.id = options.id ?? `ollama:${options.model}`;
   }
 
-  answer(
-    state: unknown,
-    questions: Record<string, SystemOneQuestion>,
-  ): Promise<SystemOneResponse> {
+  answer(state: unknown, questions: Record<string, SystemOneQuestion>): Promise<SystemOneResponse> {
     return this.client.answer(state, questions);
   }
 }
@@ -415,7 +412,9 @@ export class OpenAiSystemOneBackend implements DecisionBackend {
     const content = extractChatContent(answer);
     const parsed = content ? extractJsonObject(content) : undefined;
     if (!parsed) {
-      throw new Error(`system one openai: no JSON object in reply (${content?.slice(0, 80) ?? ""})`);
+      throw new Error(
+        `system one openai: no JSON object in reply (${content?.slice(0, 80) ?? ""})`,
+      );
     }
 
     const answers: Record<string, SystemOneAnswer> = {};
