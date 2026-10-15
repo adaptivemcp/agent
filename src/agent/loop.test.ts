@@ -742,6 +742,35 @@ describe("agent loop", () => {
     runtime.close();
   });
 
+  it("never lets a contradictory server suggestion lower the implied gate", () => {
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s22",
+      invoke: async () => ({ ok: true }),
+    });
+
+    // A server that asks for confirmation and pairs it with a lower risk is
+    // self-contradictory. Hosts gate on risk, so the confirmation must win:
+    // a suggestion cannot be used to *lower* the implied gate.
+    const applied = runtime.applyServerMetadata(
+      {
+        tools: [
+          { name: "y", annotation: { risk: "medium", require_approval: true } },
+          { name: "z", annotation: { risk: "not-a-level" } },
+        ],
+      },
+      { serverName: "srv" },
+    );
+
+    expect(runtime.adaptive.memory.getTool("y", "srv")?.annotation.risk).toBe("high");
+    expect(runtime.adaptive.approval.gate("y", "srv")).toBe("require_confirmation");
+    // An untrusted document cannot smuggle an unknown risk into the store.
+    expect(runtime.adaptive.memory.getTool("z", "srv")?.annotation.risk).toBeUndefined();
+    expect(applied).toEqual({ annotations: 1, approvals: 1, budgets: 0 });
+
+    runtime.close();
+  });
+
   it("aggregates tools from multiple servers into one derived view", async () => {
     const alpha = new InMemoryToolset("alpha", [{ name: "one", handler: () => ({ ok: true }) }]);
     const beta = new InMemoryToolset("beta", [{ name: "two", handler: () => ({ ok: true }) }]);
