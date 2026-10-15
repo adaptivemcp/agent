@@ -98,19 +98,26 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `suggestModel(tool, { server })` — the `Router`'s learned model id for a tool.
 - `modelProvider(catalog, { tool, server })` — a `ModelSelector` for `runAgent`
   that routes each step to the learned model (or the catalog default).
-- `systemOneProvider(catalog, { model, backend })` — a `DecisionProvider` for
-  `runAgent` backed by a fast System One model. One cheap call decides model +
-  tool intent + decoding from the learned metadata; it declines (falling back to
-  `modelProvider`) when the backend fails or is not confident. Two backends are
-  wired behind the same `DecisionBackend` seam: the local Ollama one
-  (`/v1/systemone`, `tev1:0.8b` by default) and a remote OpenAI-compatible one
-  (`OpenAiSystemOneBackend`, tier 1) that prompts any `/chat/completions`
-  endpoint. The CLI selects the tier with `--system1-backend ollama|openai`
-  (`$SYSTEM1_BACKEND`, default `ollama`; the `openai` tier needs
-  `--system1-model`/`$SYSTEM1_MODEL` and fails fast as config/exit 3 without
-  it). Pass `backend` to inject either (or a test double). The opt-in live
-  check is `pnpm test:system1` (`SYSTEM1_LIVE=1`, skipped when the backend is
-  absent). `lastDecisionSummary()` powers the REPL's `/decision`.
+- `systemOneProvider(catalog, { model, backend, backends })` — a
+  `DecisionProvider` for `runAgent` backed by a fast System One model. One cheap
+  call decides model + tool intent + decoding from the learned metadata; it
+  declines (falling back to `modelProvider`) when the backend fails or is not
+  confident. Two backends are wired behind the same `DecisionBackend` seam: the
+  local Ollama one (`/v1/systemone`, `tev1:0.8b` by default) and a remote
+  OpenAI-compatible one (`OpenAiSystemOneBackend`, tier 1) that prompts any
+  `/chat/completions` endpoint. The CLI selects a single tier with
+  `--system1-backend ollama|openai` (`$SYSTEM1_BACKEND`, default `ollama`; the
+  `openai` tier needs `--system1-model`/`$SYSTEM1_MODEL` and fails fast as
+  config/exit 3 without it). Pass `backend` to inject one (or a test double), or
+  `backends: [...]` to compose a tiered one (`TieredSystemOneBackend`): ordered
+  by `tier` (local first), failover **on errors only** (low confidence declines
+  in the advisor instead), one shared `timeoutMs` budget split across tiers so
+  failover can never double latency, and **one fallback per decision call** (at
+  most two backends — construction throws on more). `onFallback` reports a
+  tier that failed and was retried; `onError` still means every tier failed.
+  `lastDecisionSummary()` (REPL `/decision`) attributes the tier that answered,
+  e.g. `backend openai:… (fell back from ollama:…)`. The opt-in live check is
+  `pnpm test:system1` (`SYSTEM1_LIVE=1`, skipped when the backend is absent).
 - `seedToolAnnotations(specs, { defaultRisk })` — seed static risk from standard
   MCP tool annotations (falling back to a local `defaultRisk` for servers that
   ship none) so the gate can prompt before learning. Server `initialize`

@@ -37,7 +37,12 @@ export {
   type JobCaller,
   type JobPollingOptions,
 } from "./jobs.js";
-export { AiSdkModel, createAiSdkModel, AI_SDK_CAPABILITIES, type AiSdkProviderConfig } from "./provider/ai-sdk.js";
+export {
+  AiSdkModel,
+  createAiSdkModel,
+  AI_SDK_CAPABILITIES,
+  type AiSdkProviderConfig,
+} from "./provider/ai-sdk.js";
 export { ScriptedModel, type ScriptedTurn, type ScriptedToolCall } from "./provider/scripted.js";
 export {
   ModelCatalog,
@@ -89,6 +94,7 @@ export {
   type SystemOneAdvisorOptions,
   type SystemOneDecision,
 } from "./decision/advisor.js";
+export { TieredSystemOneBackend, type TieredSystemOneBackendOptions } from "./decision/tiered.js";
 export {
   parseServer,
   parseServers,
