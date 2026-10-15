@@ -2,7 +2,7 @@
 
 ## Principles
 
-1. **The agent is the host.** It owns the LLM completion *and* the tool execution,
+1. **The agent is the host.** It owns the LLM completion _and_ the tool execution,
    which is what lets Adaptive MCP's recommendations (routing, decoding, retry,
    approval) actually be applied and measured.
 2. **Libraries do the learning.** This repo composes `@adaptivemcp/*`; it does not
@@ -58,20 +58,20 @@ loses the gate, middleware, graph, and telemetry.
 
 ## Package mapping
 
-| Package | Role in the agent |
-| --- | --- |
-| `@adaptivemcp/spec` | Shared types; `DecodingProfile`, `ModelCapabilities`, `Store` |
-| `@adaptivemcp/memory` | SQLite store (`MemoryStore`), execution-node graph |
-| `@adaptivemcp/telemetry` | Records tool executions (`TelemetryRecorder`) |
-| `@adaptivemcp/evaluation` | Insights + recommendations (`Evaluator`) |
-| `@adaptivemcp/routing` | Model/budget (`Router`) and decoding (`DecodingAdvisor`/`DecodingResolver`) |
-| `@adaptivemcp/orchestration` | Retry/workflow recommendations (`Orchestrator`) |
-| `@adaptivemcp/approval` | `ApprovalGate` (allow/deny/require_confirmation) |
-| `@adaptivemcp/thin-client` | Execution loop + `GraphTrackingMiddleware` + OAuth middleware |
-| `@adaptivemcp/middleware` | `MiddlewareChain` + `Compressor` |
-| `@adaptivemcp/graph-analysis` | Critical path, cascades, anti-patterns, forecasting |
-| `@adaptivemcp/extension` | Derived `tools-metadata` view + MCP resources |
-| `@adaptivemcp/runtime` | `AdaptiveRuntime` batteries-included wiring |
+| Package                       | Role in the agent                                                           |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| `@adaptivemcp/spec`           | Shared types; `DecodingProfile`, `ModelCapabilities`, `Store`               |
+| `@adaptivemcp/memory`         | SQLite store (`MemoryStore`), execution-node graph                          |
+| `@adaptivemcp/telemetry`      | Records tool executions (`TelemetryRecorder`)                               |
+| `@adaptivemcp/evaluation`     | Insights + recommendations (`Evaluator`)                                    |
+| `@adaptivemcp/routing`        | Model/budget (`Router`) and decoding (`DecodingAdvisor`/`DecodingResolver`) |
+| `@adaptivemcp/orchestration`  | Retry/workflow recommendations (`Orchestrator`)                             |
+| `@adaptivemcp/approval`       | `ApprovalGate` (allow/deny/require_confirmation)                            |
+| `@adaptivemcp/thin-client`    | Execution loop + `GraphTrackingMiddleware` + OAuth middleware               |
+| `@adaptivemcp/middleware`     | `MiddlewareChain` + `Compressor`                                            |
+| `@adaptivemcp/graph-analysis` | Critical path, cascades, anti-patterns, forecasting                         |
+| `@adaptivemcp/extension`      | Derived `tools-metadata` view + MCP resources                               |
+| `@adaptivemcp/runtime`        | `AdaptiveRuntime` batteries-included wiring                                 |
 
 ## Sessions, workflows, graph
 
@@ -175,11 +175,11 @@ disables selection.
   token in `beforeCall`, `ThinClient` hands the credentials to the handler as
   part of its `ToolHandlerCallContext`, and `HttpToolset` injects them through a
   custom `fetch`. A rejected token fails the call with `HTTP 401: …`, which
-  triggers a refresh — the *next* call carries the fresh token, with no manual
+  triggers a refresh — the _next_ call carries the fresh token, with no manual
   reconnect. Credentials are an HTTP concept: a stdio server authenticates
   through `env` at spawn. Covered end-to-end by
   `src/mcp/http-oauth.integration.test.ts` (no external services).
-- **Result classification.** Real servers often report *logical* failures
+- **Result classification.** Real servers often report _logical_ failures
   in-band (a JSON envelope with `status:"error"`, as an object or JSON text)
   rather than via the MCP `isError` flag. `AgentRuntime` passes
   `envelopeClassifier()` to `ThinClient.classifyResult`, so such outcomes are
@@ -210,7 +210,10 @@ An optional fast decision layer (`src/decision/`) in front of the chat model.
 learned metadata plus the request into one verdict (model / tool intent /
 decoding), declining when the backend fails or confidence is low. `runAgent`
 consumes it via `decide` (`DecisionProvider`); `AgentRuntime.systemOneProvider`
-builds it (`--system1`; `/decision` shows the last verdict). It is not a
+builds it — the CLI picks the tier with `--system1-backend ollama|openai`
+(`$SYSTEM1_BACKEND`, default `ollama`; the resolver in `src/cli-args.ts`
+fails fast as config/exit 3 when the openai tier has no model), and
+`/decision` shows the last verdict. It is not a
 `ChatModel` and never touches the chat path.
 
 ## Model catalog
