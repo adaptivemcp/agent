@@ -201,8 +201,12 @@ disables selection.
 ## System One decisions
 
 An optional fast decision layer (`src/decision/`) in front of the chat model.
-`SystemOneClient` / `OllamaSystemOneBackend` call Ollama's `/v1/systemone`
-(`DecisionBackend` is the seam for remote tiers); `SystemOneAdvisor` turns the
+`SystemOneClient` / `OllamaSystemOneBackend` call Ollama's `/v1/systemone`;
+`DecisionBackend` is the seam, with a second, remote tier —
+`OpenAiSystemOneBackend` — that prompts any OpenAI-compatible
+`/chat/completions` endpoint and coerces the JSON reply back into the
+`SystemOneResponse` shape (injected via `systemOneProvider(catalog, { backend })`).
+`SystemOneAdvisor` turns the
 learned metadata plus the request into one verdict (model / tool intent /
 decoding), declining when the backend fails or confidence is low. `runAgent`
 consumes it via `decide` (`DecisionProvider`); `AgentRuntime.systemOneProvider`

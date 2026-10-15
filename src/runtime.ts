@@ -48,6 +48,7 @@ import {
   OllamaSystemOneBackend,
   SYSTEM_ONE_DEFAULT_BASE_URL,
   SYSTEM_ONE_DEFAULT_MODEL,
+  type DecisionBackend,
 } from "./decision/systemone.js";
 import { SystemOneAdvisor, type DecisionToolInfo, type SystemOneDecision } from "./decision/advisor.js";
 
@@ -129,6 +130,14 @@ export interface SystemOneProviderOptions {
   env?: NodeJS.ProcessEnv;
   /** Backend id for observability; defaults to `ollama:<model>`. */
   backendId?: string;
+  /**
+   * Provide a ready-made decision backend instead of the built-in local Ollama
+   * one. This is the seam for the remote tier (`OpenAiSystemOneBackend`) or a
+   * test double; when set, `baseURL`/`model`/`env` above are ignored (the
+   * backend already carries its own connection settings) and only
+   * `minConfidence`/`timeoutMs`/`onError` still apply.
+   */
+  backend?: DecisionBackend;
   /** Called when the decision backend fails (the provider then declines). */
   onError?: (error: unknown) => void;
 }
@@ -641,19 +650,25 @@ export class AgentRuntime implements AgentExecutor {
    * decision layer declines (backend down, low confidence), the loop falls back
    * to `selectModel`/`decoding`, so this stays purely additive.
    *
-   * Today only a local Ollama backend (`tev1:0.8b` by default) is wired; the
-   * `DecisionBackend` seam takes remote tier backends (jev, laya, OpenAI) later.
+   * Today two backends are wired behind the same seam: the local Ollama backend
+   * (`tev1:0.8b` by default) and a remote OpenAI-compatible one
+   * (`OpenAiSystemOneBackend`). Pass `options.backend` to inject either, or a
+   * test double.
    */
   systemOneProvider(catalog: ModelCatalog, options: SystemOneProviderOptions = {}): DecisionProvider {
     const env = options.env ?? process.env;
-    const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
-    const backend = new OllamaSystemOneBackend({
-      id: options.backendId ?? `ollama:${model}`,
-      baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
-      model,
-      timeoutMs: options.timeoutMs,
-      fetchImpl: options.fetchImpl,
-    });
+    const backend: DecisionBackend =
+      options.backend ??
+      (() => {
+        const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
+        return new OllamaSystemOneBackend({
+          id: options.backendId ?? `ollama:${model}`,
+          baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
+          model,
+          timeoutMs: options.timeoutMs,
+          fetchImpl: options.fetchImpl,
+        });
+      })();
     const advisor = new SystemOneAdvisor({
       backend,
       minConfidence: options.minConfidence,

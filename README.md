@@ -169,9 +169,38 @@ pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
 - The backend URL reuses `$OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`).
 - `/decision` shows the last decision (model, tools, decoding, confidence,
   rationale).
-- Remote decision backends (jev, laya, an OpenAI decision endpoint) implement the
-  same `DecisionBackend` seam and can be tiered in later; tev1 is the only one
-  wired today.
+
+**Remote backends.** The decision layer is not tied to a local Ollama. The same
+`DecisionBackend` seam has a second, remote tier: `OpenAiSystemOneBackend` posts
+one prompt to any OpenAI-compatible `/chat/completions` endpoint (a hosted
+`gpt-4o-mini`, a self-hosted vLLM/llama-server, or a gateway) and coerces the
+JSON reply back into the `SystemOneResponse` shape, so hosts without a local
+`tev1` model can still use the fast path. Inject it (or any backend) via
+`AgentRuntime.systemOneProvider(catalog, { backend })`; the injected backend
+overrides the built-in Ollama construction entirely.
+
+```ts
+import { OpenAiSystemOneBackend } from "@adaptivemcp/agent";
+
+const provider = runtime.systemOneProvider(catalog, {
+  backend: new OpenAiSystemOneBackend({
+    model: "gpt-4o-mini",        // required
+    baseURL: process.env.SYSTEM1_BASE_URL,  // defaults to $SYSTEM1_BASE_URL, else OpenAI
+    apiKey: process.env.SYSTEM1_API_KEY,    // defaults to $SYSTEM1_API_KEY, else $OPENAI_API_KEY
+  }),
+});
+```
+
+To exercise the remote tier against a real endpoint (opt-in, skipped when the
+backend is absent so the default `pnpm test` stays offline):
+
+```bash
+SYSTEM1_LIVE=1 \
+SYSTEM1_LIVE_BASE_URL=https://api.openai.com/v1 \
+SYSTEM1_LIVE_API_KEY=$OPENAI_API_KEY \
+SYSTEM1_LIVE_MODEL=gpt-4o-mini \
+pnpm test:system1
+```
 
 ### Against your own endpoint and servers
 
