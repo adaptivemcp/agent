@@ -238,11 +238,34 @@ per-tool model recommendation references a runnable model.
 
 1. **Done:** apply decoding recommendations to the next model step
    (`AgentRuntime.decodingProvider` + the loop's `DecodingProvider` seam).
-2. Interactive REPL **done** (`src/repl.ts`, streaming, multi-turn); a
-   full-screen TUI (opencode-inspired) over the same library core is next.
+2. Interactive REPL **done** (`src/repl.ts`, streaming, multi-turn). A
+   full-screen TUI (opencode-inspired) is **deferred** — see the rationale
+   below; the REPL is the supported interactive surface until then.
 3. **Done:** per-turn workflow DAGs — `AgentRuntime.runTurn` groups a step's tool
    calls under one `agent_turn_<n>` root.
 4. **Done:** model catalog with OpenAI-compatible + Anthropic + Google
    integrations and learned per-tool routing (`AgentRuntime.modelProvider`);
    token streaming in `AiSdkModel.stream`.
 5. Publish the library as a consumable package.
+
+### Full-screen TUI: deferred (2026-10-15)
+
+The opencode-inspired full-screen TUI (roadmap 2) is **deferred**, not dropped.
+The seams a TUI would consume are already stable and tested at the loop level
+(`runAgent` + the `AgentEvent` stream via `onEvent`, plus `AgentRuntime`), so the
+defer is a sequencing call, not a rewrite. Rationale:
+
+- **`priority:low`.** The REPL is the supported interactive surface; a TUI is
+  incremental DX polish, not a capability gap.
+- **No TUI dependency today, and the renderer layer is untested.** The repo has
+  no `ink`/`blessed`/etc., and `src/repl.ts` / `src/cli.ts` are explicitly
+  excluded from coverage — the render switch has zero direct tests. Building a
+  second renderer on an untested first one doubles the surface before it is
+  covered.
+- **The CLI's option assembly must be extracted first.** `cli.ts` builds
+  `ReplOptions` inline (~lines 461–513); a TUI is a third renderer next to the
+  REPL's `render()` and the one-shot `renderOneShot()`, which needs that assembly
+  pulled into a shared factory to avoid triplicating it.
+
+Revisit once the renderer layer carries tests and the CLI factory is shared. The
+event surface is already sufficient — no new events are needed for a TUI.

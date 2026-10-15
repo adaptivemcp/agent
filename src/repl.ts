@@ -159,6 +159,17 @@ export async function runRepl(options: ReplOptions): Promise<void> {
         // Silent by default; the model is still adapting. Uncomment to surface:
         // output.write(color.dim(`  · decoding ${JSON.stringify(event.params)}\n`));
         break;
+      case "decision_applied": {
+        // The System One fast path picking a verdict is worth a line — it is the
+        // one signal that the decision layer actually fired this turn.
+        ensureNewline();
+        const bits: string[] = [];
+        if (event.model) bits.push(event.model);
+        if (event.tools?.length) bits.push(`tools: ${event.tools.join(", ")}`);
+        output.write(color.dim(`  ↳ decision${bits.length ? ` ${bits.join(" | ")}` : ""}\n`));
+        if (event.rationale) output.write(color.dim(`      ${preview(event.rationale, 160)}\n`));
+        break;
+      }
     }
   };
 
