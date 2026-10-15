@@ -24,6 +24,8 @@ export {
   sanitize,
   type InMemoryTool,
   type McpToolResult,
+  type ResourceToolset,
+  type ToolCallContext,
   type Toolset,
 } from "./mcp/toolset.js";
 export { StdioToolset, type StdioToolsetOptions } from "./mcp/stdio.js";
