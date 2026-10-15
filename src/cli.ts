@@ -14,7 +14,7 @@ import { AgentRuntime, type ServerToolsMetadata } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
 import { exampleServerOptions, isHttpServerSpec, parseServer, type ServerSpec } from "./config.js";
-import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
+import { buildRunConfig } from "./cli-config.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
 import { ExitCode } from "./exit-codes.js";
@@ -27,7 +27,8 @@ import {
   type System1Selection,
 } from "./cli-args.js";
 import { jobPollingMiddleware } from "./jobs.js";
-import type { AgentEvent, ChatModel } from "./types.js";
+import { renderOneShot, stringify } from "./render.js";
+import type { ChatModel } from "./types.js";
 
 async function main(): Promise<void> {
   let args: CliArgs;
@@ -277,30 +278,21 @@ async function main(): Promise<void> {
       }
     }
 
-    const stream = !args.noStream;
-    const maxSteps = args.maxSteps ?? 8;
-    // Adaptive MCP selects the model per tool unless one was pinned.
-    const selectModel = pinned ? undefined : runtime.modelProvider(catalog);
-    const capabilities = defaultModel.capabilities ?? AI_SDK_CAPABILITIES;
-    const decoding = runtime.decodingProvider(capabilities);
-    // Fast System-1 decision layer in front of the router (opt-in); the tier
-    // selection was resolved (and validated) before any server spawned.
-    const decide = system1Enabled
-      ? runtime.systemOneProvider(catalog, { model: args.system1Model, ...system1Selection })
-      : undefined;
+    const runConfig = buildRunConfig({
+      args,
+      model: defaultModel,
+      pinned: Boolean(pinned),
+      tools: specs,
+      runtime,
+      catalog,
+      system: systemWithServers,
+      system1: system1Enabled ? system1Selection : undefined,
+    });
 
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       await runRepl({
-        model: defaultModel,
-        tools: specs,
-        executor: runtime,
-        system: systemWithServers,
-        decoding,
-        selectModel,
-        decide,
-        maxSteps,
-        stream,
+        ...runConfig,
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
         decision: () => runtime.lastDecisionSummary(),
@@ -320,7 +312,7 @@ async function main(): Promise<void> {
         graph: () => runtime.graphView(),
         models: () => catalog.describe(),
         decodingFor: (tool) => {
-          const recommendation = runtime.suggestDecoding(tool, capabilities, {
+          const recommendation = runtime.suggestDecoding(tool, runConfig.capabilities, {
             serverName: serverByTool.get(tool),
           });
           return recommendation ? JSON.stringify(recommendation, null, 2) : undefined;
@@ -333,14 +325,7 @@ async function main(): Promise<void> {
 
     const learned = args.context ? runtime.learnedContext() : "";
     const result = await runAgent({
-      model: defaultModel,
-      tools: specs,
-      executor: runtime,
-      maxSteps,
-      decoding,
-      selectModel,
-      decide,
-      stream,
+      ...runConfig,
       messages: [
         {
           role: "system",
@@ -360,54 +345,6 @@ async function main(): Promise<void> {
   } finally {
     await tools.close();
     await headroom?.close();
-  }
-}
-
-/** Compact one-shot rendering: stream text inline, tool lines underneath. */
-function renderOneShot(event: AgentEvent, verbose: boolean): void {
-  switch (event.type) {
-    case "text_delta":
-      process.stdout.write(event.text);
-      break;
-    case "assistant_text":
-      console.log(event.text);
-      break;
-    case "model_selected":
-      if (verbose) console.log(`· model ${event.model}`);
-      break;
-    case "usage":
-      if (verbose && event.cost !== undefined) console.log(`· cost $${event.cost.toFixed(6)}`);
-      break;
-    case "decoding_applied":
-      if (verbose) console.log(`· decoding ${JSON.stringify(event.params)}`);
-      break;
-    case "decision_applied": {
-      if (!verbose) break;
-      const parts: string[] = [];
-      if (event.model) parts.push(`model ${event.model}`);
-      if (event.tools) parts.push(`tools ${event.tools.join(",") || "none"}`);
-      if (event.rationale) parts.push(event.rationale);
-      console.log(`· system1 ${parts.join(" | ")}`);
-      break;
-    }
-    case "tool_call":
-      console.log(`→ ${event.call.name}(${JSON.stringify(event.call.input ?? {})})`);
-      break;
-    case "tool_result":
-      console.log(
-        event.result.ok ? `✓ ${stringify(event.result.output)}` : `✗ ${event.result.error}`,
-      );
-      break;
-  }
-}
-
-function stringify(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === undefined) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
   }
 }
 
