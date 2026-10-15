@@ -50,7 +50,12 @@ import {
   SYSTEM_ONE_DEFAULT_MODEL,
   type DecisionBackend,
 } from "./decision/systemone.js";
-import { SystemOneAdvisor, type DecisionToolInfo, type SystemOneDecision } from "./decision/advisor.js";
+import { TieredSystemOneBackend } from "./decision/tiered.js";
+import {
+  SystemOneAdvisor,
+  type DecisionToolInfo,
+  type SystemOneDecision,
+} from "./decision/advisor.js";
 
 /** Performs the raw MCP tool call (transport lives behind this seam). */
 export type ToolInvoker = (
@@ -138,6 +143,26 @@ export interface SystemOneProviderOptions {
    * `minConfidence`/`timeoutMs`/`onError` still apply.
    */
   backend?: DecisionBackend;
+  /**
+   * Compose several decision backends into one tiered backend
+   * (`TieredSystemOneBackend`): tried in `tier` order (local first, remote
+   * second), falling through to the next tier **only on errors** — a
+   * low-confidence verdict is still the advisor's call to decline, never a
+   * fallback trigger. The attempts share `timeoutMs` as one total budget
+   * (default 8000ms), so failover cannot double decision latency, and the
+   * chain is capped at **one fallback per decision call**: at most two
+   * backends (construction throws on more).
+   *
+   * Takes precedence over `backend` when both are set. `lastDecisionSummary()`
+   * then attributes the verdict to the tier that actually answered.
+   */
+  backends?: DecisionBackend[];
+  /**
+   * Called when a tier fails **and the next tier's attempt starts** — i.e. a
+   * recovered fallback. Distinct from `onError`, which means every tier failed
+   * and the provider declined; use this to count fallbacks.
+   */
+  onFallback?: (error: unknown, from: DecisionBackend, to: DecisionBackend) => void;
   /** Called when the decision backend fails (the provider then declines). */
   onError?: (error: unknown) => void;
 }
@@ -183,6 +208,8 @@ export class AgentRuntime implements AgentExecutor {
   private readonly serverBudgets = new Map<string, number>();
   private lastDecoding?: ToolDecoding;
   private lastSystemOne?: SystemOneDecision;
+  /** Which backend produced `lastSystemOne` (tier attribution, for `/decision`). */
+  private lastSystemOneBackend?: string;
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
@@ -220,7 +247,11 @@ export class AgentRuntime implements AgentExecutor {
   }
 
   /** Execute one tool call through approval → middleware → retry → telemetry → view. */
-  async execute(call: ToolCall, spec: ToolSpec, context?: ExecutionContext): Promise<ToolExecutionResult> {
+  async execute(
+    call: ToolCall,
+    spec: ToolSpec,
+    context?: ExecutionContext,
+  ): Promise<ToolExecutionResult> {
     const startedAt = Date.now();
     let recorded: McpToolResult = { ok: true };
 
@@ -270,7 +301,12 @@ export class AgentRuntime implements AgentExecutor {
       cost: context?.cost,
     });
 
-    return { ok: recorded.ok, error: recorded.error, output: recorded.output, decision: outcome.decision };
+    return {
+      ok: recorded.ok,
+      error: recorded.error,
+      output: recorded.output,
+      decision: outcome.decision,
+    };
   }
 
   /**
@@ -296,7 +332,11 @@ export class AgentRuntime implements AgentExecutor {
       // gets a conservative, host-owned seed rather than no signal at all.
       const risk = riskFromAnnotations(spec.annotations) ?? options.defaultRisk;
       if (!risk) continue;
-      this.adaptive.memory.setAnnotation({ toolName: spec.name, serverName: spec.serverName, risk });
+      this.adaptive.memory.setAnnotation({
+        toolName: spec.name,
+        serverName: spec.serverName,
+        risk,
+      });
     }
   }
 
@@ -425,15 +465,13 @@ export class AgentRuntime implements AgentExecutor {
       if (failed >= 20) flags.push("flaky");
       if (record.annotation.risk) flags.push(`risk ${record.annotation.risk}`);
       if (record.insights[0]) flags.push(record.insights[0].key);
-      const cooccurrence = record.insights.find((insight) => insight.key === "tool_cooccurrence")?.value as
-        | Array<{ tool?: string }>
-        | undefined;
+      const cooccurrence = record.insights.find((insight) => insight.key === "tool_cooccurrence")
+        ?.value as Array<{ tool?: string }> | undefined;
       if (cooccurrence?.[0]?.tool) flags.push(`often with ${cooccurrence[0].tool}`);
       const retry = this.retryPolicyFor(record.toolName, record.serverName);
       if (retry?.enabled && retry.maxAttempts > 1) flags.push(`retry x${retry.maxAttempts}`);
       const model = record.recommendations.find((rec) => rec.type === "model")?.payload as
-        | { model?: string }
-        | undefined;
+        { model?: string } | undefined;
       const suffix = flags.length > 0 ? ` (${flags.join(", ")})` : "";
       const modelHint = model?.model ? `; suggested model ${model.model}` : "";
       return `- ${record.toolName}: ${record.stats.invocations} calls, ${failed}% failed, avg ${avg}ms${suffix}${modelHint}`;
@@ -492,7 +530,11 @@ export class AgentRuntime implements AgentExecutor {
     const payload = this.adaptive.memory
       .getTool(toolName, serverName)
       ?.recommendations.find(
-        (rec) => rec.type === "workflow" && rec.payload != null && typeof rec.payload === "object" && "retry" in rec.payload,
+        (rec) =>
+          rec.type === "workflow" &&
+          rec.payload != null &&
+          typeof rec.payload === "object" &&
+          "retry" in rec.payload,
       )?.payload;
     return payload && typeof payload === "object" && "retry" in payload
       ? (payload as { retry: RetryPolicy }).retry
@@ -581,7 +623,8 @@ export class AgentRuntime implements AgentExecutor {
     const total = records.reduce((sum, record) => sum + record.stats.totalCost, 0);
     const calls = records.reduce((sum, record) => sum + record.stats.invocations, 0);
     const lines = records.map(
-      (record) => `  ${record.toolName}: ${record.stats.invocations} calls, $${record.stats.totalCost.toFixed(6)}`,
+      (record) =>
+        `  ${record.toolName}: ${record.stats.invocations} calls, $${record.stats.totalCost.toFixed(6)}`,
     );
     return [`total: $${total.toFixed(6)} over ${calls} tool calls`, ...lines].join("\n");
   }
@@ -655,20 +698,28 @@ export class AgentRuntime implements AgentExecutor {
    * (`OpenAiSystemOneBackend`). Pass `options.backend` to inject either, or a
    * test double.
    */
-  systemOneProvider(catalog: ModelCatalog, options: SystemOneProviderOptions = {}): DecisionProvider {
+  systemOneProvider(
+    catalog: ModelCatalog,
+    options: SystemOneProviderOptions = {},
+  ): DecisionProvider {
     const env = options.env ?? process.env;
     const backend: DecisionBackend =
-      options.backend ??
-      (() => {
-        const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
-        return new OllamaSystemOneBackend({
-          id: options.backendId ?? `ollama:${model}`,
-          baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
-          model,
-          timeoutMs: options.timeoutMs,
-          fetchImpl: options.fetchImpl,
-        });
-      })();
+      options.backends !== undefined
+        ? new TieredSystemOneBackend(options.backends, {
+            budgetMs: options.timeoutMs,
+            onFallback: options.onFallback,
+          })
+        : (options.backend ??
+          (() => {
+            const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
+            return new OllamaSystemOneBackend({
+              id: options.backendId ?? `ollama:${model}`,
+              baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
+              model,
+              timeoutMs: options.timeoutMs,
+              fetchImpl: options.fetchImpl,
+            });
+          })());
     const advisor = new SystemOneAdvisor({
       backend,
       minConfidence: options.minConfidence,
@@ -690,11 +741,18 @@ export class AgentRuntime implements AgentExecutor {
       });
       if (!decision) return undefined;
       this.lastSystemOne = decision;
+      // Attribute the verdict to the tier that actually answered (the tiered
+      // backend names the answering tier + any fallback; a plain backend is
+      // just its id), so `/decision` and the summary make failover visible.
+      this.lastSystemOneBackend =
+        backend instanceof TieredSystemOneBackend ? backend.attribution() : backend.id;
 
       const model = decision.modelId ? catalog.get(decision.modelId) : undefined;
       const capabilities = (model ?? catalog.defaultModel()).capabilities ?? AI_SDK_CAPABILITIES;
       const decoded = decision.decodingProfile
-        ? resolvedToChatParams(this.resolver.resolve({ id: decision.decodingProfile }, capabilities))
+        ? resolvedToChatParams(
+            this.resolver.resolve({ id: decision.decodingProfile }, capabilities),
+          )
         : undefined;
       const tools = decision.toolNames
         ? request.tools.filter((spec) => decision.toolNames!.includes(spec.name))
@@ -715,9 +773,12 @@ export class AgentRuntime implements AgentExecutor {
     const parts = [`confidence ${decision.confidence.toFixed(2)}`];
     if (decision.modelId) parts.push(`model ${decision.modelId}`);
     if (decision.toolNames) {
-      parts.push(decision.toolNames.length > 0 ? `tools ${decision.toolNames.join(", ")}` : "tools none");
+      parts.push(
+        decision.toolNames.length > 0 ? `tools ${decision.toolNames.join(", ")}` : "tools none",
+      );
     }
     if (decision.decodingProfile) parts.push(`decoding ${decision.decodingProfile}`);
+    if (this.lastSystemOneBackend) parts.push(`backend ${this.lastSystemOneBackend}`);
     return `${parts.join(", ")}\n  ${decision.rationale}`;
   }
 
@@ -801,7 +862,8 @@ function resolvedToChatParams(resolved: ResolvedDecodingSettings): ChatParams | 
   if (resolved.minP !== undefined) params.minP = resolved.minP;
   if (resolved.presencePenalty !== undefined) params.presencePenalty = resolved.presencePenalty;
   if (resolved.frequencyPenalty !== undefined) params.frequencyPenalty = resolved.frequencyPenalty;
-  if (resolved.repetitionPenalty !== undefined) params.repetitionPenalty = resolved.repetitionPenalty;
+  if (resolved.repetitionPenalty !== undefined)
+    params.repetitionPenalty = resolved.repetitionPenalty;
   return Object.keys(params).length > 0 ? params : undefined;
 }
 

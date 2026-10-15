@@ -226,6 +226,40 @@ SYSTEM1_LIVE_MODEL=gpt-4o-mini \
 pnpm test:system1
 ```
 
+**Failover across tiers.** Pass several backends and they compose into one
+tiered decision backend (`TieredSystemOneBackend`) that keeps the fast path
+fast:
+
+- **Ordering by `tier`** — local first (`0`), remote second (`1`); pass them
+  in any order, the tier field decides.
+- **Errors only** — a tier falls through to the next on transport/HTTP errors
+  (connection refused, timeout, 4xx/5xx, unparseable reply). A _low-confidence_
+  verdict never triggers failover: the tier answered, and declining on
+  confidence is the advisor's call.
+- **One shared timeout budget** — `timeoutMs` (default 8000ms) is split across
+  the tiers, so failover can never double decision latency: a hung local tier
+  burns only its slice and the remote tier still gets the rest.
+- **One fallback per decision call** — at most a primary plus one fallback
+  (constructing with more than two backends throws); the cap is structural.
+- **Attribution** — `/decision` reports which tier answered, e.g.
+  `backend openai:gpt-4o-mini (fell back from ollama:tev1:0.8b)`.
+
+```ts
+import { OllamaSystemOneBackend, OpenAiSystemOneBackend } from "@adaptivemcp/agent";
+
+const provider = runtime.systemOneProvider(catalog, {
+  backends: [
+    new OllamaSystemOneBackend({ model: "tev1:0.8b" }),
+    new OpenAiSystemOneBackend({ model: "gpt-4o-mini" }),
+  ],
+  onFallback: (error, from, to) => console.warn(`failover ${from.id} → ${to.id}`),
+  onError: (error) => console.error(`decision declined: ${error}`), // every tier failed
+});
+```
+
+`onFallback` fires when a tier fails and the next one is actually tried;
+`onError` still means the decision layer declined entirely (all tiers failed).
+
 ### Against your own endpoint and servers
 
 ```bash

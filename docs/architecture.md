@@ -206,11 +206,16 @@ An optional fast decision layer (`src/decision/`) in front of the chat model.
 `OpenAiSystemOneBackend` — that prompts any OpenAI-compatible
 `/chat/completions` endpoint and coerces the JSON reply back into the
 `SystemOneResponse` shape (injected via `systemOneProvider(catalog, { backend })`).
+`systemOneProvider(catalog, { backends: [...] })` composes several backends
+into a `TieredSystemOneBackend`: ordered by `tier` (local first), failover on
+transport/HTTP errors only (low confidence declines in the advisor instead),
+one shared `timeoutMs` budget split across tiers, and at most one fallback per
+decision call; `lastDecisionSummary()` attributes the tier that answered.
 `SystemOneAdvisor` turns the
 learned metadata plus the request into one verdict (model / tool intent /
 decoding), declining when the backend fails or confidence is low. `runAgent`
 consumes it via `decide` (`DecisionProvider`); `AgentRuntime.systemOneProvider`
-builds it — the CLI picks the tier with `--system1-backend ollama|openai`
+builds it — the CLI picks a single tier with `--system1-backend ollama|openai`
 (`$SYSTEM1_BACKEND`, default `ollama`; the resolver in `src/cli-args.ts`
 fails fast as config/exit 3 when the openai tier has no model), and
 `/decision` shows the last verdict. It is not a
