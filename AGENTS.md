@@ -153,8 +153,9 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 
 ## Current limitations / next
 
-- Interactive streaming REPL (`src/repl.ts`) + one-shot CLI, both streaming; a
-  full-screen TUI is next.
+- Interactive streaming REPL (`src/repl.ts`) + one-shot CLI, both streaming. A
+  full-screen TUI is deferred (`priority:low`; see `docs/architecture.md`
+  "Full-screen TUI: deferred").
 - Decoding and model routing are applied per step (`decodingProvider`,
   `modelProvider`); model selection needs enough per-tool signal
   (`--router-min-invocations`, default 10).
