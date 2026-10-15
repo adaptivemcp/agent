@@ -98,12 +98,16 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
 - `suggestModel(tool, { server })` — the `Router`'s learned model id for a tool.
 - `modelProvider(catalog, { tool, server })` — a `ModelSelector` for `runAgent`
   that routes each step to the learned model (or the catalog default).
-- `systemOneProvider(catalog, { model })` — a `DecisionProvider` for `runAgent`
-  backed by a fast, local System One model (Ollama `/v1/systemone`, `tev1:0.8b`
-  by default). One cheap call decides model + tool intent + decoding from the
-  learned metadata; it declines (falling back to `modelProvider`) when the
-  backend fails or is not confident. Remote backends implement `DecisionBackend`
-  later. `lastDecisionSummary()` powers the REPL's `/decision`.
+- `systemOneProvider(catalog, { model, backend })` — a `DecisionProvider` for
+  `runAgent` backed by a fast System One model. One cheap call decides model +
+  tool intent + decoding from the learned metadata; it declines (falling back to
+  `modelProvider`) when the backend fails or is not confident. Two backends are
+  wired behind the same `DecisionBackend` seam: the local Ollama one
+  (`/v1/systemone`, `tev1:0.8b` by default) and a remote OpenAI-compatible one
+  (`OpenAiSystemOneBackend`, tier 1) that prompts any `/chat/completions`
+  endpoint. Pass `backend` to inject either (or a test double). The opt-in live
+  check is `pnpm test:system1` (`SYSTEM1_LIVE=1`, skipped when the backend is
+  absent). `lastDecisionSummary()` powers the REPL's `/decision`.
 - `seedToolAnnotations(specs, { defaultRisk })` — seed static risk from standard
   MCP tool annotations (falling back to a local `defaultRisk` for servers that
   ship none) so the gate can prompt before learning. Server `initialize`
