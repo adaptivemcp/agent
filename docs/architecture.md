@@ -268,15 +268,19 @@ defer is a sequencing call, not a rewrite. Rationale:
 
 - **`priority:low`.** The REPL is the supported interactive surface; a TUI is
   incremental DX polish, not a capability gap.
-- **No TUI dependency today, and the renderer layer is untested.** The repo has
-  no `ink`/`blessed`/etc., and `src/repl.ts` / `src/cli.ts` are explicitly
-  excluded from coverage — the render switch has zero direct tests. Building a
-  second renderer on an untested first one doubles the surface before it is
-  covered.
-- **The CLI's option assembly must be extracted first.** `cli.ts` builds
-  `ReplOptions` inline (~lines 461–513); a TUI is a third renderer next to the
-  REPL's `render()` and the one-shot `renderOneShot()`, which needs that assembly
-  pulled into a shared factory to avoid triplicating it.
+- **No TUI dependency today.** The repo has no `ink`/`blessed`/etc.; adding one
+  is still a decision worth making deliberately rather than as a side effect.
 
-Revisit once the renderer layer carries tests and the CLI factory is shared. The
-event surface is already sufficient — no new events are needed for a TUI.
+Both hygiene preconditions are now **met** (2026-10-15, #26):
+
+- **The render layer is tested.** Both event renderers live in `src/render.ts`
+  (`renderOneShot` for one-shot, `createReplRenderer` for the REPL) and are
+  covered directly by `src/render.test.ts`; `src/cli.ts` / `src/repl.ts` no
+  longer own a render switch.
+- **The CLI's option assembly is shared.** `buildRunConfig`
+  (`src/cli-config.ts`, tested in `cli-config.test.ts`) assembles the inputs
+  every renderer consumes, so a third renderer spreads one config instead of
+  re-deriving the pinned-model and System One rules.
+
+Revisit when someone wants to own the TUI dependency choice. The event surface
+is already sufficient — no new events are needed for a TUI.

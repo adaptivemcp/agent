@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { runAgent } from "./agent/loop.js";
+import { createReplRenderer, makeColor, preview } from "./render.js";
 import type {
-  AgentEvent,
   AgentExecutor,
   ChatMessage,
   ChatModel,
@@ -60,8 +60,7 @@ export interface ReplOptions {
 }
 
 const DEFAULT_SYSTEM =
-  "You are an MCP-native agent. Use the available tools when helpful. " +
-  "Keep answers concise.";
+  "You are an MCP-native agent. Use the available tools when helpful. " + "Keep answers concise.";
 
 /**
  * A line-based, multi-turn REPL over the same library core as `runAgent`.
@@ -107,71 +106,10 @@ export async function runRepl(options: ReplOptions): Promise<void> {
       `${color.dim("commands: /help, /tools, /models, /graph, /metadata, /cost, /policy, /drift, /retrieve <hash>, /decoding <tool>, /decoding-report, /decision, /reset, /exit")}\n\n`,
   );
 
-  let lineStart = true;
-  let lastModel: string | undefined;
-  const ensureNewline = (): void => {
-    if (!lineStart) {
-      output.write("\n");
-      lineStart = true;
-    }
-  };
-  const render = (event: AgentEvent): void => {
-    switch (event.type) {
-      case "text_delta":
-        output.write(event.text);
-        lineStart = event.text.endsWith("\n");
-        break;
-      case "assistant_text":
-        ensureNewline();
-        output.write(`${event.text}\n`);
-        break;
-      case "model_selected":
-        if (event.model !== lastModel) {
-          lastModel = event.model;
-          output.write(color.dim(`[${event.model}] `));
-        }
-        break;
-      case "usage":
-        if (event.cost !== undefined) {
-          ensureNewline();
-          output.write(color.dim(`  · $${event.cost.toFixed(6)} (${event.model})\n`));
-        }
-        break;
-      case "guard":
-        ensureNewline();
-        output.write(color.dim(`  ⚠ ${event.message}\n`));
-        break;
-      case "tool_call":
-        ensureNewline();
-        output.write(
-          color.dim(`  → ${event.call.name}(${preview(JSON.stringify(event.call.input ?? {}), 160)})\n`),
-        );
-        break;
-      case "tool_result":
-        ensureNewline();
-        output.write(
-          event.result.ok
-            ? color.green(`  ✓ ${preview(stringify(event.result.output), 200)}\n`)
-            : color.red(`  ✗ ${preview(event.result.error ?? stringify(event.result.output), 200)}\n`),
-        );
-        break;
-      case "decoding_applied":
-        // Silent by default; the model is still adapting. Uncomment to surface:
-        // output.write(color.dim(`  · decoding ${JSON.stringify(event.params)}\n`));
-        break;
-      case "decision_applied": {
-        // The System One fast path picking a verdict is worth a line — it is the
-        // one signal that the decision layer actually fired this turn.
-        ensureNewline();
-        const bits: string[] = [];
-        if (event.model) bits.push(event.model);
-        if (event.tools?.length) bits.push(`tools: ${event.tools.join(", ")}`);
-        output.write(color.dim(`  ↳ decision${bits.length ? ` ${bits.join(" | ")}` : ""}\n`));
-        if (event.rationale) output.write(color.dim(`      ${preview(event.rationale, 160)}\n`));
-        break;
-      }
-    }
-  };
+  // One shared renderer (src/render.ts), the same one the one-shot CLI uses at
+  // a lower density. It owns the "am I mid-line?" state, so a prompt always
+  // starts on a fresh line after streamed text.
+  const { render, ensureNewline, prompt, reset } = createReplRenderer({ output, color });
 
   // Human-in-the-loop approvals: prompt for require_confirmation decisions.
   if (options.approvals !== false && options.executor.setRequestApproval) {
@@ -223,18 +161,25 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/tools":
             for (const tool of options.tools) {
-              output.write(`  ${tool.name}${tool.serverName ? color.dim(` [${tool.serverName}]`) : ""}\n`);
-              if (tool.description) output.write(color.dim(`    ${preview(tool.description, 160)}\n`));
+              output.write(
+                `  ${tool.name}${tool.serverName ? color.dim(` [${tool.serverName}]`) : ""}\n`,
+              );
+              if (tool.description)
+                output.write(color.dim(`    ${preview(tool.description, 160)}\n`));
             }
             continue;
           case "/models":
-            output.write(options.models ? `${options.models()}\n` : color.dim("(no model catalog)\n"));
+            output.write(
+              options.models ? `${options.models()}\n` : color.dim("(no model catalog)\n"),
+            );
             continue;
           case "/graph":
             output.write(options.graph ? `${options.graph()}\n` : color.dim("(no graph view)\n"));
             continue;
           case "/metadata":
-            output.write(options.metadata ? `${options.metadata()}\n` : color.dim("(no metadata view)\n"));
+            output.write(
+              options.metadata ? `${options.metadata()}\n` : color.dim("(no metadata view)\n"),
+            );
             continue;
           case "/cost":
             output.write(options.cost ? `${options.cost()}\n` : color.dim("(no cost data)\n"));
@@ -258,16 +203,22 @@ export async function runRepl(options: ReplOptions): Promise<void> {
               output.write(color.dim("usage: /decoding <tool>\n"));
             } else {
               const suggestion = options.decodingFor?.(arg);
-              output.write(suggestion ? `${suggestion}\n` : color.dim(`(no recommendation for ${arg} yet)\n`));
+              output.write(
+                suggestion ? `${suggestion}\n` : color.dim(`(no recommendation for ${arg} yet)\n`),
+              );
             }
             continue;
           case "/decoding-report":
             output.write(
-              options.decodingReport ? `${options.decodingReport()}\n` : color.dim("(no decoding telemetry)\n"),
+              options.decodingReport
+                ? `${options.decodingReport()}\n`
+                : color.dim("(no decoding telemetry)\n"),
             );
             continue;
           case "/decision":
-            output.write(options.decision ? `${options.decision()}\n` : color.dim("(no decision layer)\n"));
+            output.write(
+              options.decision ? `${options.decision()}\n` : color.dim("(no decision layer)\n"),
+            );
             continue;
           case "/reset":
             messages = [{ role: "system", content: baseSystem }];
@@ -289,9 +240,8 @@ export async function runRepl(options: ReplOptions): Promise<void> {
       }
 
       const next: ChatMessage[] = [...messages, { role: "user", content: trimmed }];
-      lastModel = undefined;
-      output.write(color.dim("agent> "));
-      lineStart = false;
+      reset();
+      prompt(color.dim("agent> "));
       try {
         const result = await runAgent({
           model: options.model,
@@ -310,47 +260,13 @@ export async function runRepl(options: ReplOptions): Promise<void> {
         persistHistory();
       } catch (error) {
         ensureNewline();
-        output.write(color.red(`error: ${error instanceof Error ? error.message : String(error)}\n`));
+        output.write(
+          color.red(`error: ${error instanceof Error ? error.message : String(error)}\n`),
+        );
       }
     }
   } finally {
     rl.close();
     output.write("\n");
-  }
-}
-
-function makeColor(output: NodeJS.WritableStream): {
-  bold: (text: string) => string;
-  dim: (text: string) => string;
-  cyan: (text: string) => string;
-  green: (text: string) => string;
-  red: (text: string) => string;
-} {
-  const enabled = Boolean((output as NodeJS.WriteStream).isTTY);
-  const wrap =
-    (code: string) =>
-    (text: string): string =>
-      enabled ? `\u001b[${code}m${text}\u001b[0m` : text;
-  return {
-    bold: wrap("1"),
-    dim: wrap("2"),
-    cyan: wrap("36"),
-    green: wrap("32"),
-    red: wrap("31"),
-  };
-}
-
-function preview(text: string, max: number): string {
-  const single = text.replace(/\s+/g, " ").trim();
-  return single.length > max ? `${single.slice(0, max - 1)}…` : single;
-}
-
-function stringify(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === undefined) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
   }
 }
