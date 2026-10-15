@@ -29,7 +29,10 @@ pnpm demo          # vertical slice: loop -> telemetry -> evaluation -> derived 
 pnpm test          # offline: scripted model + in-memory toolset
 ```
 
-`pnpm test` stays offline. A separate **real-server** integration test drives
+`pnpm test` stays offline (nothing leaves the machine): besides the scripted
+model and in-memory toolset it runs an in-process Streamable HTTP MCP server
+end-to-end, including the OAuth flow (static-header and refreshed-token auth).
+A separate **real-server** integration test drives
 the sibling [QueryCleaner/QC](../../qc) MCP server over stdio (it needs QC's
 `uv` venv); run it with `pnpm test:integration` (it is skipped unless
 `QC_MCP_INTEGRATION=1`). CI runs it in the optional `integration-qc` job, which

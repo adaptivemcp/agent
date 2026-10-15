@@ -7,14 +7,25 @@ export interface McpToolResult {
 }
 
 /**
+ * Per-call context a toolset may use when executing. Today only `credentials`
+ * is meaningful: an auth-injecting middleware (see `@adaptivemcp/thin-client`)
+ * resolves a token in `beforeCall`, `ThinClient` hands it to the handler, and
+ * the transport puts it on the wire. Omit it and the call is unauthenticated.
+ */
+export interface ToolCallContext {
+  credentials?: Record<string, unknown>;
+}
+
+/**
  * The tool seam. A toolset exposes tools to the agent and executes calls.
- * Implemented by the stdio MCP client (`StdioToolset`) and by an in-memory
- * toolset used in tests and the offline demo.
+ * Implemented by the stdio MCP client (`StdioToolset`), the Streamable HTTP
+ * client (`HttpToolset`), and by an in-memory toolset used in tests and the
+ * offline demo.
  */
 export interface Toolset {
   readonly serverName: string;
   listTools(): Promise<ToolSpec[]>;
-  callTool(name: string, input: unknown): Promise<McpToolResult>;
+  callTool(name: string, input: unknown, context?: ToolCallContext): Promise<McpToolResult>;
   close(): Promise<void>;
 }
 
@@ -96,10 +107,10 @@ export class AggregateToolset implements Toolset {
     return specs;
   }
 
-  async callTool(name: string, input: unknown): Promise<McpToolResult> {
+  async callTool(name: string, input: unknown, context?: ToolCallContext): Promise<McpToolResult> {
     const entry = this.route.get(name);
     if (!entry) return { ok: false, error: `unknown tool: ${name}` };
-    return entry.toolset.callTool(entry.originalName, input);
+    return entry.toolset.callTool(entry.originalName, input, context);
   }
 
   async close(): Promise<void> {

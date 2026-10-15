@@ -164,6 +164,16 @@ disables selection.
   tool list. `--server` accepts the `name=command args` shorthand or a JSON
   object: `{"name","command","args","cwd","env"}` for stdio, or
   `{"name","transport":"http","url","headers"}` for HTTP.
+- **Authentication.** Two paths, both landing on the request `Authorization`
+  header: static `headers` in the server spec (a bearer/API key), or
+  `OAuthMiddleware` from `@adaptivemcp/thin-client`. The middleware resolves a
+  token in `beforeCall`, `ThinClient` hands the credentials to the handler as
+  part of its `ToolHandlerCallContext`, and `HttpToolset` injects them through a
+  custom `fetch`. A rejected token fails the call with `HTTP 401: …`, which
+  triggers a refresh — the *next* call carries the fresh token, with no manual
+  reconnect. Credentials are an HTTP concept: a stdio server authenticates
+  through `env` at spawn. Covered end-to-end by
+  `src/mcp/http-oauth.integration.test.ts` (no external services).
 - **Result classification.** Real servers often report *logical* failures
   in-band (a JSON envelope with `status:"error"`, as an object or JSON text)
   rather than via the MCP `isError` flag. `AgentRuntime` passes

@@ -369,7 +369,7 @@ async function main(): Promise<void> {
       yamlPath: args.yaml,
       sessionId,
       workflowId: args.workflow,
-      invoke: (name, input) => tools.callTool(name, input),
+      invoke: (name, input, _serverName, context) => tools.callTool(name, input, context),
       middleware,
       routerModels: catalog.routingOptions(),
       routerMinInvocations: args.routerMinInvocations,

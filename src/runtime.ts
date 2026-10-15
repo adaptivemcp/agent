@@ -42,7 +42,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import type { ModelCatalog } from "./models/catalog.js";
-import type { McpToolResult } from "./mcp/toolset.js";
+import type { McpToolResult, ToolCallContext } from "./mcp/toolset.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import {
   OllamaSystemOneBackend,
@@ -52,7 +52,12 @@ import {
 import { SystemOneAdvisor, type DecisionToolInfo, type SystemOneDecision } from "./decision/advisor.js";
 
 /** Performs the raw MCP tool call (transport lives behind this seam). */
-export type ToolInvoker = (toolName: string, input: unknown, serverName?: string) => Promise<McpToolResult>;
+export type ToolInvoker = (
+  toolName: string,
+  input: unknown,
+  serverName?: string,
+  context?: ToolCallContext,
+) => Promise<McpToolResult>;
 
 /** A finished tool execution, surfaced for cross-client reporting. */
 export interface ExecutionObservation {
@@ -189,8 +194,10 @@ export class AgentRuntime implements AgentExecutor {
     const startedAt = Date.now();
     let recorded: McpToolResult = { ok: true };
 
-    const handler: ToolHandler = async (input) => {
-      const result = await this.invoke(spec.name, input, spec.serverName);
+    const handler: ToolHandler = async (input, context) => {
+      // `context` carries middleware-resolved credentials (OAuth); forwards them
+      // so the transport can put them on the wire.
+      const result = await this.invoke(spec.name, input, spec.serverName, context);
       recorded = result;
       return { ok: result.ok, error: result.error, output: result.output };
     };
