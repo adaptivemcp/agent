@@ -184,7 +184,21 @@ pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
   OpenAI-compatible tier below. The `openai` tier needs a model — pass
   `--system1-model` or set `$SYSTEM1_MODEL` (there is no guessed default, since
   a wrong hosted model name is a runtime 404); a bad tier or missing model
-  fails fast with exit code 3.
+  fails fast (`exit 2` for an invalid tier selector, `exit 3` for a missing
+  model).
+- The same flag accepts a **comma list** for failover:
+  `--system1-backend ollama,openai` (or `$SYSTEM1_BACKEND=ollama,openai`)
+  resolves to a two-tier chain — `TieredSystemOneBackend` tries the local tier
+  first and falls back to the remote tier **on errors only** (one fallback per
+  decision call; the selector rejects more than two tiers). In a list,
+  `--system1-model` names the `openai` element and the `ollama` element keeps
+  its local default (`$SYSTEM1_MODEL`, else `tev1:0.8b`):
+
+  ```bash
+  # local tier answers when healthy, hosted gpt-4o-mini on failure
+  pnpm dev -- --system1 --system1-backend ollama,openai --system1-model gpt-4o-mini
+  ```
+
 - The backend URL reuses `$OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`).
 - `/decision` shows the last decision (model, tools, decoding, confidence,
   rationale).

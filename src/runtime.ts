@@ -44,12 +44,7 @@ import type {
 import type { ModelCatalog } from "./models/catalog.js";
 import type { McpToolResult, ToolCallContext } from "./mcp/toolset.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
-import {
-  OllamaSystemOneBackend,
-  SYSTEM_ONE_DEFAULT_BASE_URL,
-  SYSTEM_ONE_DEFAULT_MODEL,
-  type DecisionBackend,
-} from "./decision/systemone.js";
+import { localSystemOneBackend, type DecisionBackend } from "./decision/systemone.js";
 import { TieredSystemOneBackend } from "./decision/tiered.js";
 import {
   SystemOneAdvisor,
@@ -710,16 +705,14 @@ export class AgentRuntime implements AgentExecutor {
             onFallback: options.onFallback,
           })
         : (options.backend ??
-          (() => {
-            const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
-            return new OllamaSystemOneBackend({
-              id: options.backendId ?? `ollama:${model}`,
-              baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
-              model,
-              timeoutMs: options.timeoutMs,
-              fetchImpl: options.fetchImpl,
-            });
-          })());
+          localSystemOneBackend({
+            model: options.model,
+            baseURL: options.baseURL,
+            id: options.backendId,
+            timeoutMs: options.timeoutMs,
+            fetchImpl: options.fetchImpl,
+            env,
+          }));
     const advisor = new SystemOneAdvisor({
       backend,
       minConfidence: options.minConfidence,

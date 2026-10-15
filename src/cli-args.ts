@@ -6,7 +6,21 @@
  * Keeping the parser out of `cli.ts` also matters because that entry point runs
  * `main()` at import time, which makes it un-importable from a test.
  */
-import { OpenAiSystemOneBackend, type DecisionBackend } from "./decision/systemone.js";
+import {
+  OpenAiSystemOneBackend,
+  localSystemOneBackend,
+  type DecisionBackend,
+} from "./decision/systemone.js";
+
+/** A System One decision tier selectable via `--system1-backend`. */
+export type System1Tier = "ollama" | "openai";
+
+/**
+ * Thrown when a tier selector (`--system1-backend`/`$SYSTEM1_BACKEND`) is
+ * malformed: an unknown tier, a duplicate, or more than two tiers (the
+ * structural one-fallback cap). `cli.ts` maps it to `ExitCode.Usage`.
+ */
+export class System1TierError extends Error {}
 
 export interface CliArgs {
   prompt?: string;
@@ -20,8 +34,8 @@ export interface CliArgs {
   system1: boolean;
   /** System One model id (default: $SYSTEM1_MODEL, else tev1:0.8b). */
   system1Model?: string;
-  /** System One decision backend tier (default: ollama). */
-  system1Backend?: "ollama" | "openai";
+  /** System One decision backend tier(s): one tier, or a comma list for failover (default: ollama). */
+  system1Backend?: System1Tier | System1Tier[];
   baseUrl?: string;
   apiKey?: string;
   servers: string[];
@@ -46,6 +60,33 @@ export interface CliArgs {
   context: boolean;
   verbose: boolean;
   help: boolean;
+}
+
+/**
+ * Parse a tier selector: a single tier (`ollama`), or a comma list
+ * (`ollama,openai`) that selects a failover chain. Whitespace around each
+ * element is trimmed (an empty element is invalid, not skipped).
+ *
+ * @throws System1TierError when an element is not a known tier, the list
+ * exceeds two tiers (the structural one-fallback cap of
+ * `TieredSystemOneBackend`), or a tier repeats.
+ */
+export function parseTierList(raw: string, source: string): System1Tier[] {
+  const tiers = raw.split(",").map((tier) => tier.trim());
+  for (const tier of tiers) {
+    if (tier !== "ollama" && tier !== "openai") {
+      throw new System1TierError(`${source} expects ollama|openai, got "${raw}"`);
+    }
+  }
+  if (tiers.length > 2) {
+    throw new System1TierError(
+      `${source} allows at most two tiers (one fallback per decision call), got ${tiers.length} in "${raw}"`,
+    );
+  }
+  if (new Set(tiers).size !== tiers.length) {
+    throw new System1TierError(`${source} lists a duplicate tier: "${raw}"`);
+  }
+  return tiers as System1Tier[];
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -97,11 +138,9 @@ export function parseArgs(argv: string[]): CliArgs {
         args.system1Model = next();
         break;
       case "--system1-backend": {
-        const value = next();
-        if (value !== "ollama" && value !== "openai") {
-          throw new Error(`--system1-backend expects ollama|openai, got "${value}"`);
-        }
-        args.system1Backend = value;
+        const tiers = parseTierList(next(), "--system1-backend");
+        // Single value stays a string (#21 contract); a comma list becomes an array.
+        args.system1Backend = tiers.length === 1 ? tiers[0]! : tiers;
         break;
       }
       case "--base-url":
@@ -186,23 +225,107 @@ export function parseArgs(argv: string[]): CliArgs {
 }
 
 /**
- * Resolve which System One decision backend the CLI should use.
+ * Normalize the tier selector into a validated tier list.
  *
- * Selection precedence: `--system1-backend` > `$SYSTEM1_BACKEND` > `ollama`.
- * For the `ollama` tier this returns `undefined`, meaning "let
- * `AgentRuntime.systemOneProvider` build its local default" — the local tier's
- * model/URL resolution (`$SYSTEM1_MODEL`/`$OLLAMA_BASE_URL`/`tev1:0.8b`) stays
- * owned by the runtime so there is one source of construction.
+ * Precedence: `--system1-backend` > `$SYSTEM1_BACKEND` > `ollama`. The env
+ * value is validated eagerly (even when the flag wins) — a garbage
+ * `$SYSTEM1_BACKEND` is a config bug worth surfacing either way, matching the
+ * single-tier semantics of #21.
+ */
+function normalizeSystem1Tiers(
+  args: Pick<CliArgs, "system1Backend">,
+  env: NodeJS.ProcessEnv,
+): System1Tier[] {
+  const envValue = env.SYSTEM1_BACKEND || undefined;
+  const envTiers = envValue !== undefined ? parseTierList(envValue, "$SYSTEM1_BACKEND") : undefined;
+  const flag = args.system1Backend;
+  if (flag !== undefined) {
+    // Re-validate through the same parser so programmatic callers (including
+    // an empty array) fail fast with the same messages as parsed input.
+    return parseTierList(Array.isArray(flag) ? flag.join(",") : flag, "--system1-backend");
+  }
+  return envTiers ?? ["ollama"];
+}
+
+/** The `openai` element: model from `--system1-model` else `$SYSTEM1_MODEL`, no guessed default. */
+function openAiBackendFor(
+  args: Pick<CliArgs, "system1Model">,
+  env: NodeJS.ProcessEnv,
+  fetchImpl?: typeof fetch,
+): OpenAiSystemOneBackend {
+  const model = args.system1Model || env.SYSTEM1_MODEL || undefined;
+  if (model === undefined) {
+    throw new Error(
+      "--system1-backend openai needs a decision model: pass --system1-model <id> or set $SYSTEM1_MODEL",
+    );
+  }
+  return new OpenAiSystemOneBackend({ model, env, fetchImpl });
+}
+
+/**
+ * The selection `AgentRuntime.systemOneProvider` consumes: either one
+ * `backend` (a single tier — `undefined` defers to the provider's local Ollama
+ * default) or `backends` (a two-tier failover chain from a comma list).
+ */
+export interface System1Selection {
+  backend?: DecisionBackend;
+  backends?: DecisionBackend[];
+}
+
+/**
+ * Resolve the System One selection for `--system1-backend` / `$SYSTEM1_BACKEND`.
  *
- * The `openai` tier builds an `OpenAiSystemOneBackend`; its connection
- * defaults (`$SYSTEM1_BASE_URL` else OpenAI, `$SYSTEM1_API_KEY`/`$OPENAI_API_KEY`)
- * resolve inside the backend, and the model must come from `--system1-model`
- * or `$SYSTEM1_MODEL` — there is deliberately no guessed default, because a
- * wrong hosted model name is a runtime 404 on a remote endpoint.
+ * Selection precedence: `--system1-backend` > `$SYSTEM1_BACKEND` > `ollama`;
+ * either source may be a single tier or a comma list (`ollama,openai`) that
+ * maps to `systemOneProvider({ backends })` — a `TieredSystemOneBackend` with
+ * **one fallback per decision call** (the cap `parseTierList` enforces by
+ * rejecting more than two tiers).
  *
- * @throws Error when the tier value is neither `ollama` nor `openai`, or when
- * the `openai` tier has no model configured (callers map this to
- * `ExitCode.Config`).
+ * Model semantics:
+ * - Single tier: unchanged from #19/#21 — `ollama` defers to the provider's
+ *   local default (`--system1-model`/`$SYSTEM1_MODEL`/`tev1:0.8b`); `openai`
+ *   requires `--system1-model` or `$SYSTEM1_MODEL` (fail-fast, exit 3).
+ * - In a tier list the `ollama` element keeps its local default chain
+ *   (`$SYSTEM1_MODEL` else `tev1:0.8b`) — the flag is not applied to it,
+ *   because one flag cannot name two models and the remote element has no
+ *   usable default; so `--system1-backend ollama,openai --system1-model
+ *   gpt-4o-mini` runs the local default locally and `gpt-4o-mini` remotely.
+ *
+ * @throws {System1TierError} on an invalid/duplicate/oversized tier selector
+ * (callers map it to `ExitCode.Usage`).
+ * @throws Error when the `openai` element has no configured model (callers map
+ * it to `ExitCode.Config`).
+ * @param fetchImpl Injectable fetch, for tests (both elements' wire shapes can
+ * then be asserted offline).
+ */
+export function resolveSystem1(
+  args: Pick<CliArgs, "system1Backend" | "system1Model">,
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl?: typeof fetch,
+): System1Selection {
+  const tiers = normalizeSystem1Tiers(args, env);
+  if (tiers.length === 1) {
+    const tier = tiers[0]!;
+    return { backend: tier === "ollama" ? undefined : openAiBackendFor(args, env, fetchImpl) };
+  }
+  return {
+    backends: tiers.map((tier) =>
+      tier === "ollama"
+        ? localSystemOneBackend({ env, fetchImpl })
+        : openAiBackendFor(args, env, fetchImpl),
+    ),
+  };
+}
+
+/**
+ * Single-tier selection kept from #21: `undefined` = the provider's local
+ * Ollama default, an instance = the `openai` tier. Prefer {@link resolveSystem1},
+ * which also handles tier lists.
+ *
+ * Selection precedence, connection defaults, and the missing-model fail-fast
+ * are delegated there (single-tier behavior is unchanged).
+ *
+ * @throws {System1TierError} when the configuration resolves a tier list.
  * @param fetchImpl Injectable fetch, for tests (the remote tier's wire shape
  * can then be asserted offline).
  */
@@ -211,20 +334,14 @@ export function system1BackendFor(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl?: typeof fetch,
 ): DecisionBackend | undefined {
-  const envTier = env.SYSTEM1_BACKEND || undefined;
-  if (envTier !== undefined && envTier !== "ollama" && envTier !== "openai") {
-    throw new Error(`$SYSTEM1_BACKEND expects ollama|openai, got "${envTier}"`);
-  }
-  const tier = args.system1Backend ?? envTier ?? "ollama";
-  if (tier === "ollama") return undefined;
-
-  const model = args.system1Model || env.SYSTEM1_MODEL || undefined;
-  if (model === undefined) {
-    throw new Error(
-      "--system1-backend openai needs a decision model: pass --system1-model <id> or set $SYSTEM1_MODEL",
+  const tiers = normalizeSystem1Tiers(args, env);
+  if (tiers.length !== 1) {
+    throw new System1TierError(
+      `system1BackendFor() resolves a single tier; use resolveSystem1() for "${tiers.join(",")}"`,
     );
   }
-  return new OpenAiSystemOneBackend({ model, env, fetchImpl });
+  const tier = tiers[0]!;
+  return tier === "ollama" ? undefined : openAiBackendFor(args, env, fetchImpl);
 }
 
 export const HELP_TEXT = `adaptivemcp-agent
@@ -246,7 +363,9 @@ Options:
   --no-ollama                   Don't auto-discover models from a local Ollama
   --system1                     Enable the System One fast decision layer (Ollama or OpenAI)
   --system1-model <id>          System One model (default: $SYSTEM1_MODEL, tev1:0.8b)
-  --system1-backend <tier>      Decision backend: ollama|openai (default: $SYSTEM1_BACKEND, ollama)
+  --system1-backend <tier>      Decision tier(s): ollama|openai; a comma list (ollama,openai)
+                                enables failover with one fallback per decision call
+                                (default: $SYSTEM1_BACKEND, ollama)
   --default-risk <level>        Risk for tools whose server sends no MCP annotations
                                 (low|medium|high|none; default medium)
   --await-jobs                  Poll long-running tool jobs (job handles) to completion
