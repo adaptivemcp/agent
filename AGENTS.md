@@ -105,11 +105,16 @@ retry + middleware), and `GraphTrackingMiddleware`, and exposes:
   confident. Two backends are wired behind the same `DecisionBackend` seam: the
   local Ollama one (`/v1/systemone`, `tev1:0.8b` by default) and a remote
   OpenAI-compatible one (`OpenAiSystemOneBackend`, tier 1) that prompts any
-  `/chat/completions` endpoint. The CLI selects a single tier with
+  `/chat/completions` endpoint. The CLI selects a tier with
   `--system1-backend ollama|openai` (`$SYSTEM1_BACKEND`, default `ollama`; the
   `openai` tier needs `--system1-model`/`$SYSTEM1_MODEL` and fails fast as
-  config/exit 3 without it). Pass `backend` to inject one (or a test double), or
-  `backends: [...]` to compose a tiered one (`TieredSystemOneBackend`): ordered
+  config/exit 3 without it); a **comma list** (`--system1-backend
+ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
+  the tiered chain below — with invalid selectors failing as usage/exit 2, and
+  in a list `--system1-model` naming the `openai` element while the `ollama`
+  element keeps its local default. Pass `backend` to inject one (or a test
+  double), or `backends: [...]` to compose a tiered one
+  (`TieredSystemOneBackend`): ordered
   by `tier` (local first), failover **on errors only** (low confidence declines
   in the advisor instead), one shared `timeoutMs` budget split across tiers so
   failover can never double latency, and **one fallback per decision call** (at

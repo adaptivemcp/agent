@@ -215,9 +215,12 @@ decision call; `lastDecisionSummary()` attributes the tier that answered.
 learned metadata plus the request into one verdict (model / tool intent /
 decoding), declining when the backend fails or confidence is low. `runAgent`
 consumes it via `decide` (`DecisionProvider`); `AgentRuntime.systemOneProvider`
-builds it — the CLI picks a single tier with `--system1-backend ollama|openai`
-(`$SYSTEM1_BACKEND`, default `ollama`; the resolver in `src/cli-args.ts`
-fails fast as config/exit 3 when the openai tier has no model), and
+builds it — the CLI picks a tier with `--system1-backend ollama|openai` or a
+**comma list** (`ollama,openai`, from the flag or `$SYSTEM1_BACKEND`; the
+resolver in `src/cli-args.ts` maps a single tier to `backend` and a list to
+`backends`, failing fast as usage/exit 2 on an invalid selector — unknown
+element, duplicates, or more than two tiers — and as config/exit 3 when the
+openai element has no model), and
 `/decision` shows the last verdict. It is not a
 `ChatModel` and never touches the chat path.
 

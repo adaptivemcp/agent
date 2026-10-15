@@ -1,6 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
-import { HELP_TEXT, parseArgs, printHelp, system1BackendFor, type CliArgs } from "./cli-args.js";
-import type { SystemOneQuestion, SystemOneResponse } from "./decision/systemone.js";
+import {
+  HELP_TEXT,
+  parseArgs,
+  printHelp,
+  resolveSystem1,
+  system1BackendFor,
+  System1TierError,
+  type CliArgs,
+} from "./cli-args.js";
+import {
+  SYSTEM_ONE_DEFAULT_MODEL,
+  type SystemOneQuestion,
+  type SystemOneResponse,
+} from "./decision/systemone.js";
+import { AgentRuntime } from "./runtime.js";
+import { ModelCatalog } from "./models/catalog.js";
 
 /** Minimal resolver input: only the system1 fields matter. */
 function args(
@@ -29,6 +43,23 @@ const QUESTIONS: Record<string, SystemOneQuestion> = {
     criteria: { fast: null, safe: null },
   },
 };
+
+/** Catalog fixture for the provider-wiring e2e (mirrors tiered.test.ts). */
+const CATALOG = new ModelCatalog(
+  [
+    {
+      id: "local",
+      provider: "openai-compatible",
+      model: "Qwen/Qwen3-8B",
+      baseURL: "http://127.0.0.1:9931/v1",
+      apiKeyEnv: "LLAMA_API_KEY",
+      costWeight: 1,
+      latencyWeight: 1,
+      default: true,
+    },
+  ],
+  { LLAMA_API_KEY: "k" },
+);
 
 describe("parseArgs --system1-backend", () => {
   it("accepts ollama and openai", () => {
@@ -232,6 +263,174 @@ describe("system1BackendFor", () => {
   });
 });
 
+describe("parseArgs --system1-backend tier lists", () => {
+  it("parses a comma list into an array", () => {
+    expect(parseArgs(["--system1-backend", "ollama,openai"]).system1Backend).toEqual([
+      "ollama",
+      "openai",
+    ]);
+  });
+
+  it("trims whitespace around tiers", () => {
+    expect(parseArgs(["--system1-backend", "ollama, openai"]).system1Backend).toEqual([
+      "ollama",
+      "openai",
+    ]);
+  });
+
+  it("rejects an unknown element inside a list", () => {
+    expect(() => parseArgs(["--system1-backend", "ollama,bogus"])).toThrow(System1TierError);
+    expect(() => parseArgs(["--system1-backend", "ollama,bogus"])).toThrow(/ollama\|openai/);
+  });
+
+  it("rejects a duplicate tier", () => {
+    expect(() => parseArgs(["--system1-backend", "ollama,ollama"])).toThrow(/duplicate/);
+  });
+
+  it("rejects more than two tiers (one fallback per decision call)", () => {
+    expect(() => parseArgs(["--system1-backend", "ollama,openai,ollama"])).toThrow(/at most two/);
+  });
+
+  it("rejects an empty tier element", () => {
+    expect(() => parseArgs(["--system1-backend", "ollama,"])).toThrow(/ollama\|openai/);
+  });
+});
+
+describe("resolveSystem1", () => {
+  it("keeps single-tier behavior: ollama → deferred default, openai → instance", () => {
+    const local = resolveSystem1(args(), {});
+    expect(local.backend).toBeUndefined();
+    expect(local.backends).toBeUndefined();
+
+    const remote = resolveSystem1(
+      args({ system1Backend: "openai", system1Model: "gpt-4o-mini" }),
+      {},
+    );
+    expect(remote.backend?.tier).toBe(1);
+    expect(remote.backend?.model).toBe("gpt-4o-mini");
+    expect(remote.backends).toBeUndefined();
+  });
+
+  it("maps a two-tier flag list to a backends chain (local first)", () => {
+    const selection = resolveSystem1(
+      args({ system1Backend: ["ollama", "openai"], system1Model: "gpt-4o-mini" }),
+      {},
+    );
+    expect(selection.backend).toBeUndefined();
+    expect(selection.backends).toHaveLength(2);
+    expect(selection.backends![0]!.tier).toBe(0);
+    // The flag names the remote element; the local tier keeps its defaults.
+    expect(selection.backends![0]!.model).toBe(SYSTEM_ONE_DEFAULT_MODEL);
+    expect(selection.backends![1]!.tier).toBe(1);
+    expect(selection.backends![1]!.model).toBe("gpt-4o-mini");
+  });
+
+  it("maps an env tier list ($SYSTEM1_BACKEND=ollama,openai) the same way", () => {
+    const selection = resolveSystem1(args({ system1Model: "gpt-4o-mini" }), {
+      SYSTEM1_BACKEND: "ollama,openai",
+    });
+    expect(selection.backends).toHaveLength(2);
+    expect(selection.backends![0]!.tier).toBe(0);
+    expect(selection.backends![1]!.model).toBe("gpt-4o-mini");
+  });
+
+  it("lets a single flag win over an env tier list", () => {
+    const selection = resolveSystem1(args({ system1Backend: "ollama" }), {
+      SYSTEM1_BACKEND: "ollama,openai",
+    });
+    expect(selection.backend).toBeUndefined();
+    expect(selection.backends).toBeUndefined();
+  });
+
+  it("feeds $SYSTEM1_MODEL to the local element; the flag beats it for the remote", () => {
+    const selection = resolveSystem1(
+      args({ system1Backend: ["ollama", "openai"], system1Model: "gpt-4o-mini" }),
+      { SYSTEM1_MODEL: "llama3.1" },
+    );
+    expect(selection.backends![0]!.model).toBe("llama3.1");
+    expect(selection.backends![1]!.model).toBe("gpt-4o-mini");
+  });
+
+  it("fails fast when a list's openai element has no model (config/exit 3)", () => {
+    expect(() => resolveSystem1(args({ system1Backend: ["ollama", "openai"] }), {})).toThrow(
+      /--system1-model/,
+    );
+  });
+
+  it("rejects an invalid $SYSTEM1_BACKEND as a tier usage error", () => {
+    expect(() => resolveSystem1(args(), { SYSTEM1_BACKEND: "gemini" })).toThrow(System1TierError);
+    expect(() => resolveSystem1(args(), { SYSTEM1_BACKEND: "ollama,gemini" })).toThrow(
+      /\$SYSTEM1_BACKEND/,
+    );
+  });
+
+  it("guards the single-tier helper against tier lists", () => {
+    expect(() => system1BackendFor(args({ system1Backend: ["ollama", "openai"] }), {})).toThrow(
+      /resolveSystem1/,
+    );
+  });
+});
+
+describe("tier list end-to-end: parsed CLI args → provider → failover", () => {
+  it("reaches the remote tier offline and attributes it in lastDecisionSummary()", async () => {
+    const parsed = parseArgs([
+      "--system1",
+      "--system1-backend",
+      "ollama,openai",
+      "--system1-model",
+      "gpt-4o-mini",
+    ]);
+    expect(parsed.system1Backend).toEqual(["ollama", "openai"]);
+
+    const env: NodeJS.ProcessEnv = {
+      SYSTEM1_BASE_URL: "https://gw.example/v1",
+      SYSTEM1_API_KEY: "sk-test",
+    };
+    // The local tier's /v1/systemone refuses the connection; the remote tier's
+    // /chat/completions answers with a confident verdict.
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/systemone")) {
+        throw new TypeError("connect ECONNREFUSED 127.0.0.1:11434");
+      }
+      return new Response(
+        JSON.stringify({
+          model: "gpt-4o-mini",
+          choices: [
+            {
+              message: {
+                content: '{"answers":{"decoding":{"choice":"balanced","confidence":0.9}}}',
+              },
+            },
+          ],
+          usage: { prompt_tokens: 24, completion_tokens: 6 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    };
+
+    const selection = resolveSystem1(parsed, env, fetchImpl);
+    expect(selection.backends).toHaveLength(2);
+
+    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "cli-tier-list" });
+    // Mirrors cli.ts: the parsed selection is spread into the provider options.
+    const provider = runtime.systemOneProvider(CATALOG, {
+      model: parsed.system1Model,
+      ...selection,
+    });
+    const applied = await provider({
+      messages: [{ role: "user", content: "deploy" }],
+      tools: [],
+    });
+
+    expect(applied).toBeDefined();
+    expect(runtime.lastDecisionSummary()).toContain(
+      "backend openai:gpt-4o-mini (fell back from ollama:tev1:0.8b)",
+    );
+    runtime.close();
+  });
+});
+
 describe("openai tier end-to-end (injected fetch)", () => {
   it("reaches /chat/completions with auth, prompt, and coerces the reply", async () => {
     const reply = {
@@ -321,6 +520,9 @@ describe("HELP_TEXT", () => {
     expect(HELP_TEXT).toContain("--system1-backend <tier>");
     expect(HELP_TEXT).toContain("ollama|openai");
     expect(HELP_TEXT).toContain("$SYSTEM1_BACKEND");
+    // Comma-list form for the tiered failover chain (#24).
+    expect(HELP_TEXT).toContain("ollama,openai");
+    expect(HELP_TEXT).toContain("one fallback per decision call");
   });
 });
 

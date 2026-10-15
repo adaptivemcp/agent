@@ -18,8 +18,14 @@ import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
 import { ExitCode } from "./exit-codes.js";
-import { parseArgs, printHelp, system1BackendFor, type CliArgs } from "./cli-args.js";
-import type { DecisionBackend } from "./decision/systemone.js";
+import {
+  parseArgs,
+  printHelp,
+  resolveSystem1,
+  System1TierError,
+  type CliArgs,
+  type System1Selection,
+} from "./cli-args.js";
 import { jobPollingMiddleware } from "./jobs.js";
 import type { AgentEvent, ChatModel } from "./types.js";
 
@@ -93,18 +99,19 @@ async function main(): Promise<void> {
   }
   const defaultModel = pinned ?? catalog.defaultModel();
 
-  // Fast System-1 decision backend, resolved before any toolset spawns so a
-  // bad tier or a missing remote model fails fast as config (exit 3) instead
-  // of at the first decision. `undefined` means the local Ollama tier, whose
-  // construction stays owned by `systemOneProvider`.
+  // Fast System-1 decision selection, resolved before any toolset spawns so a
+  // bad tier selector fails as usage (exit 2) and a missing remote model as
+  // config (exit 3), instead of at the first decision. `{}` means the local
+  // Ollama tier (construction stays owned by `systemOneProvider`); a tier
+  // list resolves to `{ backends }` — the provider's failover chain.
   const system1Enabled = args.system1 && !pinned;
-  let system1Backend: DecisionBackend | undefined;
+  let system1Selection: System1Selection = {};
   if (system1Enabled) {
     try {
-      system1Backend = system1BackendFor(args, env);
+      system1Selection = resolveSystem1(args, env);
     } catch (error) {
       console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
-      process.exitCode = ExitCode.Config;
+      process.exitCode = error instanceof System1TierError ? ExitCode.Usage : ExitCode.Config;
       return;
     }
   }
@@ -277,9 +284,9 @@ async function main(): Promise<void> {
     const capabilities = defaultModel.capabilities ?? AI_SDK_CAPABILITIES;
     const decoding = runtime.decodingProvider(capabilities);
     // Fast System-1 decision layer in front of the router (opt-in); the tier
-    // was resolved (and validated) before any server spawned.
+    // selection was resolved (and validated) before any server spawned.
     const decide = system1Enabled
-      ? runtime.systemOneProvider(catalog, { model: args.system1Model, backend: system1Backend })
+      ? runtime.systemOneProvider(catalog, { model: args.system1Model, ...system1Selection })
       : undefined;
 
     if (args.interactive || args.prompt === undefined) {

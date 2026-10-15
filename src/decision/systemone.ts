@@ -217,6 +217,42 @@ export class OllamaSystemOneBackend implements DecisionBackend {
   }
 }
 
+/** Overrides accepted by {@link localSystemOneBackend}. */
+export interface LocalSystemOneBackendOptions {
+  /** Decision model. Defaults to `$SYSTEM1_MODEL`, else `tev1:0.8b`. */
+  model?: string;
+  /** Ollama root URL. Defaults to `$OLLAMA_BASE_URL`, else localhost. */
+  baseURL?: string;
+  /** Backend id for observability. Defaults to `ollama:<model>`. */
+  id?: string;
+  /** Abort the decision call after this long. Default 8000ms. */
+  timeoutMs?: number;
+  /** Injectable fetch, for tests. */
+  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Build the local Ollama tier with its standard default chain
+ * (`$SYSTEM1_MODEL` → `tev1:0.8b`, `$OLLAMA_BASE_URL` → localhost). This is
+ * the single source of that construction: `systemOneProvider`'s built-in
+ * default and a CLI tier list (`--system1-backend ollama,openai`) both call it,
+ * so the defaults cannot drift apart.
+ */
+export function localSystemOneBackend(
+  options: LocalSystemOneBackendOptions = {},
+): OllamaSystemOneBackend {
+  const env = options.env ?? process.env;
+  const model = options.model ?? env.SYSTEM1_MODEL ?? SYSTEM_ONE_DEFAULT_MODEL;
+  return new OllamaSystemOneBackend({
+    id: options.id ?? `ollama:${model}`,
+    baseURL: options.baseURL ?? env.OLLAMA_BASE_URL ?? SYSTEM_ONE_DEFAULT_BASE_URL,
+    model,
+    timeoutMs: options.timeoutMs,
+    fetchImpl: options.fetchImpl,
+  });
+}
+
 /** The subset of an OpenAI chat-completions response this client consumes. */
 export interface ChatCompletionsResponse {
   model?: string;
