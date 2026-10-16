@@ -53,6 +53,12 @@ By default `pnpm dev` targets a local `llama-server`
 (`${AI_BASE_URL:-http://127.0.0.1:9931/v1}`, key `$AI_API_KEY`/`$LLAMA_API_KEY`)
 and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override both.
 
+**Gate denials are visible to scripts.** `ToolExecutionResult.executed === false`
+means the _gate_ blocked the call, as opposed to the tool running and failing; a
+one-shot run that blocked at least one call exits `4` (`ExitCode.ApprovalDenied`).
+`decision` alone cannot tell the two apart — an **approved** confirmation also
+carries `decision: "require_confirmation"`.
+
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
 

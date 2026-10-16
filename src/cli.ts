@@ -47,7 +47,7 @@ import {
   type AgentDefinition,
 } from "./skills.js";
 import { renderOneShot, stringify } from "./render.js";
-import type { ChatMessage, ChatModel, ToolSpec } from "./types.js";
+import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
 async function main(): Promise<void> {
   let args: CliArgs;
@@ -468,6 +468,10 @@ async function main(): Promise<void> {
     }
 
     const learned = args.context ? runtime.learnedContext() : "";
+    // A denial is not a failure the model can fix, so the run still finishes —
+    // but a supervising script has to be able to tell, which is what the
+    // documented exit code 4 is for.
+    let denials = 0;
     const result = await runAgent({
       ...runConfig,
       messages: [
@@ -477,10 +481,19 @@ async function main(): Promise<void> {
         },
         { role: "user", content: args.prompt },
       ],
-      onEvent: (event) => renderOneShot(event, args.verbose),
+      onEvent: (event) => {
+        if (event.type === "tool_result" && isGateDenial(event.result)) denials += 1;
+        renderOneShot(event, args.verbose);
+      },
     });
 
     console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}`);
+    if (denials > 0) {
+      console.log(
+        `[agent] ${denials} tool call(s) denied by the approval gate; exiting ${ExitCode.ApprovalDenied}`,
+      );
+      process.exitCode = ExitCode.ApprovalDenied;
+    }
     if (args.verbose) {
       console.log(`\n[execution-graph]\n${runtime.graphView()}`);
       console.log(`\n[tools-metadata]\n${runtime.toolsMetadata()}`);
@@ -533,6 +546,16 @@ function finalAssistantText(messages: ChatMessage[]): string {
     if (message?.role === "assistant" && message.content.trim()) return message.content;
   }
   return "";
+}
+
+/**
+ * Whether the gate refused the call, rather than the tool running and failing.
+ * `executed === false` is the honest signal: an *approved* confirmation also
+ * carries `decision: "require_confirmation"`, so the decision alone cannot tell
+ * a block from a run.
+ */
+function isGateDenial(result: ToolExecutionResult): boolean {
+  return result.executed === false;
 }
 
 /** The package version, read from `package.json` at runtime (never bundled). */

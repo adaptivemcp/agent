@@ -303,6 +303,8 @@ export class AgentRuntime implements AgentExecutor {
         ok: false,
         error: `blocked (${outcome.decision})${reason}`,
         decision: outcome.decision,
+        // Blocked, not failed: the caller can tell the two apart.
+        executed: false,
       };
     }
 

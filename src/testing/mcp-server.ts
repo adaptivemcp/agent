@@ -26,18 +26,30 @@ server.setRequestHandler(ListToolsRequestSchema, () => ({
         required: ["text"],
       },
     },
+    {
+      name: "fixture_deploy",
+      description: "Deploy something. Destructive, so the gate has to ask a human.",
+      // The agent seeds risk from the protocol's own annotations, so this tool
+      // arrives as high risk and therefore requires confirmation.
+      annotations: { destructiveHint: true },
+      inputSchema: {
+        type: "object",
+        properties: { target: { type: "string" } },
+      },
+    },
   ],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const args = (request.params.arguments ?? {}) as { text?: unknown };
+  const args = (request.params.arguments ?? {}) as { text?: unknown; target?: unknown };
   if (DELAY_MS > 0) {
     await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
   }
-  return {
-    content: [{ type: "text", text: `echo: ${String(args.text ?? "")}` }],
-    isError: false,
-  };
+  const text =
+    request.params.name === "fixture_deploy"
+      ? `deployed: ${String(args.target ?? "")}`
+      : `echo: ${String(args.text ?? "")}`;
+  return { content: [{ type: "text", text }], isError: false };
 });
 
 await server.connect(new StdioServerTransport());

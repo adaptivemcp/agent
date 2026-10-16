@@ -384,7 +384,10 @@ pnpm dev -- \
   store and the derived view of the agent's own store (the MCP server keeps its
   own).
 - Exit codes are stable: `0` ok, `1` runtime error, `2` usage/no-server,
-  `3` provider/catalog config, `4` approval denied (`src/exit-codes.ts`).
+  `3` provider/catalog config, `4` the gate blocked at least one call
+  (`src/exit-codes.ts`). `4` describes the run, not one call: the model still
+  receives the denial and may finish its turn, but a supervising script can tell
+  that something was refused.
 
 ## Architecture
 
