@@ -112,21 +112,27 @@ Most agents (including ours today) have only the first. The second is what makes
 
 ## Our coverage
 
-| Component                                                | Status | Evidence                                               |
-| -------------------------------------------------------- | ------ | ------------------------------------------------------ |
-| Decision model (3 verdicts)                              | ✅     | `@adaptivemcp/approval` `ApprovalGate.gate()`          |
-| Gate at the execution seam                               | ✅     | consulted in `AgentRuntime.execute`                    |
-| Interactive approval prompt                              | ✅     | `setRequestApproval` in `src/repl.ts`; `--yes` bypass  |
-| Server-governed floor (a server can raise the gate)      | ✅     | `applyServerMetadata`, `serverPolicySummary`           |
-| Learned failure rate → require_confirmation              | ✅     | `ApprovalGate` consumes tool failure rate              |
-| Audit trail                                              | ✅     | execution events / telemetry                           |
-| Approval granularity (normalised action)                 | ❌     | verdicts are per tool call, not per normalised command |
-| **Pause / resume**                                       | ❌     | the gate is in-line; no suspension or resumption       |
-| User-input / output-review / iteration-review primitives | ❌     | only yes/no                                            |
-| Timeouts & retry policy for an unanswered question       | ❌     | the prompt blocks forever                              |
-| Out-of-band approval (answer from another process)       | ❌     | the answer must come from the same terminal            |
+| Component                                                | Status | Evidence                                                                                |
+| -------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
+| Decision model (3 verdicts)                              | ✅     | `@adaptivemcp/approval` `ApprovalGate.gate()`                                           |
+| Gate at the execution seam                               | ✅     | consulted in `AgentRuntime.execute`                                                     |
+| Interactive approval prompt                              | ✅     | `setRequestApproval` in `src/repl.ts`; `--yes` bypass                                   |
+| Server-governed floor (a server can raise the gate)      | ✅     | `applyServerMetadata`, `serverPolicySummary`                                            |
+| Learned failure rate → require_confirmation              | ✅     | `ApprovalGate` consumes tool failure rate                                               |
+| Audit trail                                              | ✅     | execution events / telemetry                                                            |
+| Approval granularity (normalised action)                 | ❌     | verdicts are per tool call, not per normalised command                                  |
+| **Pause / resume**                                       | 🟡     | the loop pauses and resumes (#45); the host wiring awaits the spec/memory release (#46) |
+| User-input / output-review / iteration-review primitives | ❌     | only yes/no                                                                             |
+| Timeouts & retry policy for an unanswered question       | ❌     | the prompt blocks forever                                                               |
+| Out-of-band approval (answer from another process)       | ❌     | the answer must come from the same terminal                                             |
 
-`grep -ril "interrupt\|resume\|suspend\|pause" src/` returns nothing.
+`src/agent/loop.ts` and `src/types.ts` now carry the primitive
+(`ToolExecutionResult.suspension`, `stopReason: "suspended"`,
+`unresolvedToolCalls`); the suspension _record_ and its storage are decided in
+ADR-004 in the
+[adaptive-mcp repo](https://github.com/kemalelmizan/adaptive-mcp/blob/main/docs/adr/004-archetype-component-ownership.md),
+and the agent half that uses them is blocked on those packages being published
+(#46).
 
 ## Gap
 
@@ -137,7 +143,10 @@ What is missing is everything around _when and where_ the human answers:
    the single most valuable missing primitive across all five archetypes: it turns
    approval from "a prompt in this terminal" into a real workflow, and it is the
    prerequisite for approving a child task in the
-   [orchestrator](orchestrator-agent.md) archetype.
+   [orchestrator](orchestrator-agent.md) archetype. **In progress:** the loop half
+   shipped (#45), the record + storage are decided and implemented in
+   `adaptive-mcp` (ADR-004), and the host half is written on
+   `feat/pause-resume-host` pending the release that publishes them (#46).
 2. **The rest of the human-review set** — asking for a missing value, reviewing an
    output, and an explicit timeout policy instead of blocking forever.
 3. **Normalised approval targets** (opencode's arity idea) so one approval does
