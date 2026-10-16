@@ -35,11 +35,11 @@ npx adaptivemcp-agent --help          # CLI entry point
 model and in-memory toolset it runs an in-process Streamable HTTP MCP server
 end-to-end, including the OAuth flow (static-header and refreshed-token auth).
 A separate **real-server** integration test drives
-the sibling [QueryCleaner/QC](../../qc) MCP server over stdio (it needs QC's
+[QueryCleaner/QC](https://github.com/adaptivemcp/qc) over stdio (it needs QC's
 `uv` venv); run it with `pnpm test:integration` (it is skipped unless
 `QC_MCP_INTEGRATION=1`). CI runs it in the optional `integration-qc` job, which
-is enabled by setting the repository variable `QC_E2E_ENABLED=true` and the
-`QC_REPO_TOKEN` secret (read access to the private QC repo).
+is enabled by setting the repository variable `QC_E2E_ENABLED=true` (the QC repo
+is public, so no token is needed).
 
 `pnpm demo` runs an in-memory toolset and a scripted model (no network, no API
 key), accumulates varied telemetry, then prints the derived `tools-metadata`
