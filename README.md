@@ -97,6 +97,54 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   procedure, and new failure-cascade/anomaly signals are injected into the
   conversation as warnings.
 
+## Config file
+
+Every option can live in a config file (YAML or JSON — JSON is a subset of YAML)
+so a repeatable run is one flag instead of a wall of them. **Flags override the
+file, and the file overrides the built-in defaults.**
+
+```bash
+adaptivemcp-agent --config agent.yaml --prompt "list my sources"
+```
+
+```yaml
+# agent.yaml — one place for a repeatable setup
+servers:
+  - "qc=qc mcp" # stdio shorthand
+  - '{"name":"mf","command":"npx","args":["-y","server-filesystem","."],"cwd":"/repo"}'
+  - '{"name":"remote","url":"https://host/mcp"}' # HTTP MCP server
+model: gpt-4o-mini
+baseUrl: http://127.0.0.1:9931/v1 # overrides the local integration
+apiKey: ... # or leave to $AI_API_KEY
+db: .agent/agent.db
+yaml: .agent/tools-metadata.yaml
+session: dev
+maxSteps: 12
+defaultRisk: high
+compress: true
+system1Backend: ollama,openai # one tier, or a list for failover
+```
+
+Allowed keys are the "how to run it" options: `servers`, `model`, `models`, `db`,
+`yaml`, `session`, `workflow`, `history`, `baseUrl`, `apiKey`, `maxSteps`,
+`routerMinInvocations`, `defaultRisk`, `system1`, `system1Model`,
+`system1Backend`, `awaitJobs`, `noOllama`, `noStream`, `autoApprove`, `context`,
+`serverPolicy`, `compress`, `report`, `verbose`. An unknown key or a wrong type
+is an error, not a silent no-op. Per-run choices (`--prompt`, `--interactive`,
+`--list-tools`, `--help`, `--version`) are deliberately not configurable.
+
+### The `--server` spec
+
+`--server` takes either the stdio shorthand `"name=command args"`, or a JSON
+object — for per-server `cwd`/`env`, **or an HTTP MCP server**:
+
+```bash
+# stdio with cwd/env
+adaptivemcp-agent --server '{"name":"qc","command":"qc","args":["mcp"],"cwd":"/project"}'
+# remote HTTP (needs auth on the server side)
+adaptivemcp-agent --server '{"name":"qc","url":"https://qc.example.com/mcp"}'
+```
+
 ## Models
 
 The agent has a **catalog of model integrations**. Adaptive MCP picks which one

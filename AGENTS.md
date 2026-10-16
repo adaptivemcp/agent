@@ -36,8 +36,18 @@ pnpm demo          # offline vertical slice: loop -> telemetry -> derived view
 pnpm dev           # interactive REPL (streaming, multi-turn)
 pnpm dev -- --prompt "..." --server "fs=npx ..."   # one-shot
 pnpm dev -- --compress --history /tmp/agent-history.json --session dev
+pnpm dev -- --config agent.yaml   # options from a file (flags override it)
 pnpm dev -- --help # CLI (tsx)
 ```
+
+**Config file.** `--config <file>` (YAML or JSON) holds the "how to run it"
+options (`servers`, `model`, `db`/`yaml`, `session`, `maxSteps`, `system1*`, …),
+so a repeatable run is one flag. Flags override the file, the file overrides the
+defaults; unknown keys and wrong types are errors. `src/agent-config.ts` loads
+and validates it; `parseFlags`/`resolveArgs` (`src/cli-args.ts`) do the layering.
+Per-run choices (`--prompt`, `--interactive`, `--list-tools`, `--help`,
+`--version`) are not configurable. `--server` also accepts a JSON object for
+per-server `cwd`/`env` and for HTTP MCP servers.
 
 By default `pnpm dev` targets a local `llama-server`
 (`${AI_BASE_URL:-http://127.0.0.1:9931/v1}`, key `$AI_API_KEY`/`$LLAMA_API_KEY`)
