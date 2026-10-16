@@ -166,6 +166,19 @@ describe("createReplRenderer", () => {
     );
   });
 
+  it("renders a suspension, so a paused run is visible instead of silent", () => {
+    const { output, text } = buffer();
+    const { render } = createReplRenderer({ output, color: PLAIN });
+    render({
+      type: "suspended",
+      call: TOOL_CALL.call,
+      suspensionId: "sus-1",
+      question: "approve deploy_service? — risk: high",
+      step: 0,
+    });
+    expect(text()).toBe("  ⏸ paused: approve deploy_service? — risk: high\n");
+  });
+
   it("renders a bare decision line when nothing but the verdict is present", () => {
     const { output, text } = buffer();
     const { render } = createReplRenderer({ output, color: PLAIN });
