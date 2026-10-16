@@ -82,6 +82,13 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
     if (typeof value !== "string") throw new Error(`config "${path}": "${key}" must be a string`);
     (out as Record<string, unknown>)[key] = value;
   }
+  if (doc.skills !== undefined) {
+    const value = doc.skills;
+    if (typeof value === "string") out.skills = [value];
+    else if (Array.isArray(value) && value.every((s) => typeof s === "string"))
+      out.skills = value as string[];
+    else throw new Error(`config "${path}": "skills" must be a string or a list of strings`);
+  }
   for (const key of NUMBER_KEYS) {
     const value = doc[key];
     if (value === undefined) continue;
@@ -128,6 +135,7 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
 
   const known = new Set<string>([
     "servers",
+    "skills",
     "defaultRisk",
     "system1Backend",
     ...STRING_KEYS,

@@ -80,6 +80,13 @@ generated; tool calls and results print underneath. Commands: `/tools`,
 - **Learned context.** Before each turn the agent injects a compact summary of
   observed tool reliability/insights into the system prompt (progressive
   disclosure of evaluation output); `--no-context` disables it.
+- **Skills.** `--skills <dir>` (repeatable; `./skills` is picked up automatically)
+  loads `<name>/SKILL.md` skills — instructions the model loads on demand. Only
+  each skill's `name` and `description` enter the system prompt; the body (or one
+  bundled file) is read through the `skills_read_skill` tool when the work calls
+  for it, so a large skill library costs almost nothing until it is used. A
+  malformed `SKILL.md` is reported and skipped rather than failing the run, and
+  the read tool cannot leave a skill's own directory.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool
