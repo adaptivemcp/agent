@@ -421,8 +421,18 @@ them: [`docs/archetypes/`](./docs/archetypes/README.md).
 
 ## Security
 
-- stdio MCP only today; local by default. If HTTP transport is added, bind
-  `127.0.0.1` and require auth.
+- **Local by default.** The stdio transport spawns a local MCP server, which is
+  what the examples and the whole test suite use.
+- **HTTP is a _client_ transport** — `--server` takes a JSON object with a `url`
+  for a shared or remote server (`src/mcp/http.ts`). Credentials are transport
+  concerns: static headers on the server spec and/or the `OAuthMiddleware` from
+  `@adaptivemcp/thin-client`, both of which set `Authorization`. A rejected
+  request comes back as a failed tool result carrying the status (a `401` is not
+  thrown), so the auth middleware can refresh and retry.
+- **Untrusted input stays untrusted.** Server `initialize` instructions reach the
+  prompt labelled as data; a skill's files are confined to that skill's own
+  directory; and a `require_confirmation` call is denied rather than run when
+  there is nobody to ask (see **Approvals** above).
 - Dependency overrides in `pnpm-workspace.yaml` pin patched transitive versions
   pulled by the MCP SDK (see the
   [Adaptive MCP README](https://github.com/kemalelmizan/adaptive-mcp#security)).
