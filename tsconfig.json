@@ -22,5 +22,12 @@
     "noUnusedParameters": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    // Test fixtures (a stdio MCP server, an OpenAI-compatible stub) are run
+    // through tsx by src/*.e2e.test.ts; they are not product code.
+    "src/testing/**"
+  ]
 }

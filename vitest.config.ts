@@ -28,9 +28,12 @@ export default defineConfig({
         // Type-only modules.
         "src/types.ts",
         "src/models/types.ts",
-        // Process/IO entry points, exercised via the CLI/REPL and the
-        // integration tests rather than unit tests.
+        // Process/IO entry points. `cli.ts` runs `main()` at import time, so it
+        // is exercised by spawning it (src/cli.e2e.test.ts) rather than imported;
+        // `repl.ts` has a unit test. Neither is covered by importing.
         "src/cli.ts",
+        // Test fixtures: run by src/cli.e2e.test.ts, not shipped.
+        "src/testing/**",
         "src/repl.ts",
       ],
       // Ratcheted just below the current aggregate (2026-10-15): a regression
