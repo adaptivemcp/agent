@@ -39,6 +39,10 @@
 they arrive (as `text_delta` events). `step` is the non-streaming path; both
 return the same `ChatStep`, so tool handling is identical either way.
 
+The toolset row is not only transports: `skillsToolset` and `taskToolset` are
+host-owned capabilities exposed through the same seam (see
+[Host-owned capabilities](#host-owned-capabilities) below).
+
 ## Data flow of one tool call
 
 ```text
@@ -55,6 +59,25 @@ runAgent → AgentRuntime.execute(call, spec)
 
 `AgentRuntime.execute` is the **only** sanctioned way to run a tool; bypassing it
 loses the gate, middleware, graph, and telemetry.
+
+## Host-owned capabilities
+
+Two capabilities live in the host rather than in a library, because they are
+_policy about this host's environment_ rather than framework primitives
+(ADR-004 in the sibling repo). Both are exposed as ordinary **toolsets**, so using
+them takes the same path as any MCP tool — approval gate, middleware, execution
+graph and telemetry all apply unchanged, and neither adds a protocol concept.
+
+| Capability     | Module              | What it is                                                                                                                                                                                                                                                                 |
+| -------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Skills**     | `src/skills.ts`     | `<name>/SKILL.md` instructions found under `--skills <dir>` (and a `./skills` convention). Only names and descriptions enter the system prompt; the body loads on demand through `skills_read_skill`, which cannot leave a skill's own directory.                          |
+| **Delegation** | `src/delegation.ts` | `--task` exposes `task`: a sub-agent in its own session that returns a **result, never its transcript**. It shares the parent's store (same graph and learned state, its own session) and inherits no authority — it never auto-approves and never receives `task` itself. |
+
+Both are opt-in, so a host that enables neither behaves exactly as it did before.
+The runtime's two supporting hooks are `queueMessage`/`drainQueuedMessages` (how a
+background child reports back without the parent polling) and the `store` option
+(how a child shares the parent's memory; a runtime handed a store does not close
+it).
 
 ## Package mapping
 
