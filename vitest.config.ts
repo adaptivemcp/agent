@@ -37,7 +37,7 @@ export default defineConfig({
       // gate, not an aspiration. Leaves headroom for Node/V8 environment
       // variance (local ~86.5%, CI typically ~1pt lower). Raise as coverage
       // improves.
-      thresholds: { statements: 85, branches: 79, functions: 84, lines: 85 },
+      thresholds: { statements: 86, branches: 80, functions: 85, lines: 86 },
     },
   },
 });

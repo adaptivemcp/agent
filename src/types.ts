@@ -165,6 +165,13 @@ export interface ToolExecutionResult {
   error?: string;
   /** The approval decision, when the call went through the gate. */
   decision?: string;
+  /**
+   * Set when the call did **not** run because the host paused the run to ask a
+   * human (pause/resume). The loop then stops with `stopReason: "suspended"`
+   * and leaves the call unresolved — no tool result is recorded — so resuming
+   * re-executes exactly that call. See `docs/architecture.md`.
+   */
+  suspension?: { id: string; question: string };
 }
 
 /** The execution seam: routes one tool call through the Adaptive MCP loop. */
@@ -195,7 +202,11 @@ export interface AgentExecutor {
 export interface AgentRunResult {
   messages: ChatMessage[];
   steps: number;
-  stopReason: "completed" | "max_steps";
+  /**
+   * Why the loop stopped. `"suspended"` means a tool call was left unresolved
+   * because the host paused the run for a human — resuming re-executes it.
+   */
+  stopReason: "completed" | "max_steps" | "suspended";
 }
 
 export type AgentEvent =
@@ -220,6 +231,7 @@ export type AgentEvent =
     }
   | { type: "guard"; message: string; step: number }
   | { type: "tool_call"; call: ToolCall; spec: ToolSpec; step: number }
-  | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number };
+  | { type: "tool_result"; call: ToolCall; result: ToolExecutionResult; step: number }
+  | { type: "suspended"; call: ToolCall; suspensionId: string; question: string; step: number };
 
 export type AgentEventListener = (event: AgentEvent) => void;

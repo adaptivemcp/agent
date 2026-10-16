@@ -9,7 +9,9 @@ import type {
   ChatUsage,
   DecisionProvider,
   DecodingProvider,
+  ExecutionContext,
   ModelSelector,
+  ToolCall,
   ToolSpec,
 } from "../types.js";
 
@@ -47,6 +49,27 @@ export interface RunAgentOptions {
 }
 
 /**
+ * The tool calls of the last assistant turn that still have no result — exactly
+ * the shape a paused run leaves behind. Exported so a host can tell whether a
+ * stored conversation is waiting to be resumed.
+ */
+export function unresolvedToolCalls(messages: ChatMessage[]): ToolCall[] {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role === "tool") continue;
+    if (message.role !== "assistant" || !message.toolCalls?.length) return [];
+    const answered = new Set(
+      messages
+        .slice(i + 1)
+        .filter((m) => m.role === "tool")
+        .map((m) => m.toolCallId),
+    );
+    return message.toolCalls.filter((call) => !answered.has(call.id));
+  }
+  return [];
+}
+
+/**
  * A minimal tool-calling agent loop: ask the model for one step, execute any
  * tool calls through the executor, feed the results back, repeat. Provider- and
  * transport-agnostic — it only knows `ChatModel` and `AgentExecutor`.
@@ -55,6 +78,60 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
   const messages = [...options.messages];
   const maxSteps = options.maxSteps ?? 8;
   const emit = (event: AgentEvent): void => options.onEvent?.(event);
+
+  /**
+   * Execute one batch of tool calls. Returns `true` when a call **paused** the
+   * run: the blocked call gets no tool result (it never ran) and the loop stops,
+   * so resuming re-executes exactly that call instead of the model being told a
+   * failure happened.
+   */
+  const executeBatch = async (
+    calls: ToolCall[],
+    step: number,
+    byName: Map<string, ToolSpec>,
+    context: ExecutionContext,
+  ): Promise<boolean> => {
+    for (const call of calls) {
+      const spec = byName.get(call.name);
+      emit({ type: "tool_call", call, spec: spec ?? { name: call.name, inputSchema: {} }, step });
+
+      const result = spec
+        ? await options.executor.execute(call, spec, context)
+        : { ok: false, error: `unknown tool: ${call.name}` };
+      if (result.suspension) {
+        emit({
+          type: "suspended",
+          call,
+          suspensionId: result.suspension.id,
+          question: result.suspension.question,
+          step,
+        });
+        return true;
+      }
+      emit({ type: "tool_result", call, result, step });
+
+      messages.push({
+        role: "tool",
+        content: stringify(result.output ?? result.error ?? ""),
+        toolCallId: call.id,
+        name: call.name,
+        isError: !result.ok,
+      });
+    }
+    return false;
+  };
+
+  // A seed whose last assistant turn still has unanswered tool calls is a
+  // *resumed* run: those calls run before the model is asked anything new (the
+  // "re-execute the step you resumed into" contract `langgraph` documents). A
+  // partial batch resumes correctly too, since only the unanswered calls re-run.
+  const pending = unresolvedToolCalls(messages);
+  if (pending.length > 0) {
+    const byName = new Map(options.tools.map((spec) => [spec.name, spec]));
+    if (await executeBatch(pending, 0, byName, {})) {
+      return { messages, steps: 0, stopReason: "suspended" };
+    }
+  }
 
   for (let step = 0; step < maxSteps; step += 1) {
     // Fast decision layer first (System One), then the slower router, then the
@@ -141,34 +218,16 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
 
     // Execute the whole step's tool calls inside one graph root, so they form a
     // single per-turn DAG rather than one disconnected root per call.
-    const runToolCalls = async (): Promise<void> => {
-      for (const call of chat.toolCalls) {
-        const spec = toolsByName.get(call.name);
-        emit({ type: "tool_call", call, spec: spec ?? { name: call.name, inputSchema: {} }, step });
-
-        const result = spec
-          ? await options.executor.execute(call, spec, {
-              model: activeModel.name,
-              cost: perCallCost !== undefined ? { amount: perCallCost, currency: "USD" } : undefined,
-              usage: perCallUsage,
-            })
-          : { ok: false, error: `unknown tool: ${call.name}` };
-        emit({ type: "tool_result", call, result, step });
-
-        messages.push({
-          role: "tool",
-          content: stringify(result.output ?? result.error ?? ""),
-          toolCallId: call.id,
-          name: call.name,
-          isError: !result.ok,
-        });
-      }
-    };
-    if (options.executor.runTurn) {
-      await options.executor.runTurn(`agent_turn_${step}`, runToolCalls);
-    } else {
-      await runToolCalls();
-    }
+    const runToolCalls = (): Promise<boolean> =>
+      executeBatch(chat.toolCalls, step, toolsByName, {
+        model: activeModel.name,
+        cost: perCallCost !== undefined ? { amount: perCallCost, currency: "USD" } : undefined,
+        usage: perCallUsage,
+      });
+    const suspended = options.executor.runTurn
+      ? await options.executor.runTurn(`agent_turn_${step}`, runToolCalls)
+      : await runToolCalls();
+    if (suspended) return { messages, steps: step + 1, stopReason: "suspended" };
 
     // Post-step guardrail: let the executor inject a steering message based on
     // what it observed (e.g. execution-graph failure signals).
