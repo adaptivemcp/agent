@@ -109,6 +109,13 @@ system prompt — progressive disclosure — and the body is fetched on demand; 
 read tool is confined to the skill's own directory, and a malformed `SKILL.md` is
 warned about and skipped rather than failing the run.
 
+**Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
+sub-agent that runs in its own session and returns only its result. Two rules
+bound it — the child never auto-approves (delegation must not amplify authority)
+and it never receives the `task` tool itself (recursion is bounded). Its
+completion notifications arrive through `AgentRuntime.queueMessage`, which
+`review()` drains one step at a time.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:
@@ -160,6 +167,14 @@ ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
   **With no approver set, a `require_confirmation` tool is denied** (fail closed);
   auto-approval is an explicit opt-in (the CLI's `--yes`). A permissive default
   here once ran exactly the tools a policy had flagged for a human.
+- `queueMessage(text)` / `drainQueuedMessages()` — the message queue `review()`
+  drains one step at a time. Delegation uses it so a background child reports its
+  result without the parent polling.
+- `store` option — build a runtime over an existing store instead of opening one.
+  A delegated child uses it to share the parent's memory (same learned state and
+  graph, different session); such a runtime does **not** close a store it was
+  handed (`AdaptiveRuntime.close()` closes it unconditionally, so ownership is
+  tracked here — see adaptivemcp/adaptive-mcp#51).
 - `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
 - `decodingReport()` — per-group applied-decoding telemetry (`DecodingAnalyzer`).
 - `metricDriftReport()` — recent-vs-lifetime drift per tool (`computeMetricDrift`).

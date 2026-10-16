@@ -125,21 +125,21 @@ modules), or when different parts need different tools/permissions.
 
 ## Our coverage
 
-| Component                            | Status | Evidence                                                               |
-| ------------------------------------ | ------ | ---------------------------------------------------------------------- |
-| Delegation tool                      | ❌     | no sub-agent/spawn concept (`grep -ril subagent src/` → nothing)       |
-| Sub-agent session isolation          | ❌     | one session per run (`--session`)                                      |
-| Derived permissions                  | ❌     | the gate is per call; there is no child                                |
-| Foreground / background              | ❌     | one turn at a time                                                     |
-| Shared task list                     | ❌     | —                                                                      |
-| Orchestration modes                  | ❌     | —                                                                      |
-| Aggregation / budget across children | ❌     | budgets exist per call (`--max-steps`), not across children            |
-| Learned cross-tool sequences         | 🟡     | `learnedProcedure()` _notices_ a repeated sequence; it cannot delegate |
+| Component                            | Status | Evidence                                                                                                                              |
+| ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Delegation tool                      | ✅     | `delegation.ts`: a `task` tool with `description`/`prompt`/`agent`/`background`, exposed under `--task`                               |
+| Sub-agent session isolation          | ✅     | the child gets its own `<parent>/task[-<agent>]-<n>` session and returns a result, never its transcript                               |
+| Derived permissions                  | 🟡     | a child never auto-approves and never gets the `task` tool; policy can only narrow, but nothing else narrows (no per-agent tool sets) |
+| Foreground / background              | ✅     | foreground blocks; background returns immediately and reports once via `queueMessage` (bounded concurrency)                           |
+| Shared task list                     | ❌     | —                                                                                                                                     |
+| Orchestration modes                  | ❌     | —                                                                                                                                     |
+| Aggregation / budget across children | 🟡     | a child's store, gate and per-call budgets are shared; no total budget or fan-out cap across children                                 |
+| Learned cross-tool sequences         | 🟡     | `learnedProcedure()` _notices_ a repeated sequence; it cannot delegate itself                                                         |
 
-What we have instead is **observation** of orchestration-shaped behaviour: the
-execution graph (`agent_turn_<n>`) records a step's tool calls as a DAG, and
-`@adaptivemcp/graph-analysis` finds critical paths and bottlenecks in it. That is
-the analytics layer for delegation, not delegation.
+What we have beyond that is **observation** of orchestration-shaped behaviour: the
+execution graph (`agent_turn_<n>`) records a step's tool calls as a DAG — and a
+delegated child's calls land in the same store under their own session, so the
+tree is visible in the graph rather than lost.
 
 ## Gap
 
@@ -148,11 +148,16 @@ independent halves:
 
 1. **Delegation** — a `task`-shaped tool, an isolated child session, derived
    (narrowed) permissions, and a foreground/background contract with notification.
+   **Done** (`delegation.ts`, #36): the tool, the isolated session, the
+   foreground/background contract, and the anti-escalation rule. What is _not_ yet
+   there is the rest of the permission model — named sub-agents with their own tool
+   sets and prompts (today `agent` is a label naming the child's session).
 2. **A shared task list** — the `Task`/`TaskList` model with dependencies, plus the
-   named orchestration modes, so the leader has something to plan against.
+   named orchestration modes, so the leader has something to plan against. Open
+   (#37, #39).
 
-Ordering note: (1) is usable on its own (one-shot delegation), but (2) is what
-makes multi-step orchestration legible. Both depend on the same thing the
-[HITL](human-in-the-loop.md) archetype needs — a run that can _suspend and
-resume_ — because a background child that asks for approval is exactly the
-problem pause/resume solves.
+Ordering note: (1) is usable on its own (one-shot delegation), and is now. (2) is
+what makes multi-step orchestration legible, and a _background child that asks for
+approval_ is still exactly the problem pause/resume solves — today such a child
+**denies** the call (fail closed) rather than suspending, because the host half of
+pause/resume is blocked on the library release (agent #46).

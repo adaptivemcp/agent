@@ -26,6 +26,7 @@ import type {
   ModelCapabilities,
   ResolvedDecodingSettings,
   RiskLevel,
+  Store,
   ToolDecoding,
   ToolRecord,
 } from "@adaptivemcp/spec";
@@ -92,6 +93,13 @@ export interface ServerToolsMetadata {
 export interface AgentRuntimeOptions {
   /** SQLite path for the store. Defaults to in-memory. */
   dbPath?: string;
+  /**
+   * Use an existing store instead of opening one (`dbPath` is then ignored).
+   * This is how a delegated child shares its parent's memory: same tools, same
+   * learned state, different session — so the child's calls land in the same
+   * graph rather than a throwaway store.
+   */
+  store?: Store;
   /** Where to write the derived `tools-metadata.yaml` view. */
   yamlPath?: string;
   approvalPolicy?: ApprovalPolicy;
@@ -206,8 +214,12 @@ export class AgentRuntime implements AgentExecutor {
   private approver: (toolName: string) => boolean | Promise<boolean>;
   /** Whether a host set an approver, so a denial can say why it happened. */
   private approverConfigured: boolean;
+  /** Whether this runtime opened the store, and must therefore close it. */
+  private readonly ownsStore: boolean;
   private readonly onExecuted?: (observation: ExecutionObservation) => void;
   private readonly warnedSignals = new Set<string>();
+  /** Messages for the running turn's next step (see `queueMessage`). */
+  private readonly pendingMessages: string[] = [];
   private readonly serverBudgets = new Map<string, number>();
   private lastDecoding?: ToolDecoding;
   private lastSystemOne?: SystemOneDecision;
@@ -218,8 +230,10 @@ export class AgentRuntime implements AgentExecutor {
     this.invoke = options.invoke;
     this.approver = options.requestApproval ?? (() => false);
     this.approverConfigured = options.requestApproval !== undefined;
+    this.ownsStore = options.store === undefined;
     this.onExecuted = options.onExecuted;
     this.adaptive = new AdaptiveRuntime({
+      store: options.store,
       dbPath: options.dbPath,
       yamlPath: options.yamlPath,
       middleware: options.middleware,
@@ -532,12 +546,32 @@ export class AgentRuntime implements AgentExecutor {
   /**
    * Post-step guardrail for `runAgent`: surface each new graph signal once as a
    * steering message. Returns `undefined` when there is nothing new.
+   *
+   * Queued messages come first: they are produced by the run itself (a delegated
+   * child finishing), so they are news the model is waiting on, ahead of an
+   * advisory graph warning.
    */
   review(): string | undefined {
+    const queued = this.pendingMessages.shift();
+    if (queued !== undefined) return queued;
     const fresh = this.graphSignals().filter((signal) => !this.warnedSignals.has(signal));
     if (fresh.length === 0) return undefined;
     for (const signal of fresh) this.warnedSignals.add(signal);
     return `Execution-graph warning: ${fresh.join("; ")}. Consider a different approach or stopping.`;
+  }
+
+  /**
+   * Queue a message for the running turn's next step. Used by delegation: a
+   * background child announces its result this way, so the parent learns it
+   * without polling and it arrives exactly like a guardrail.
+   */
+  queueMessage(message: string): void {
+    this.pendingMessages.push(message);
+  }
+
+  /** Take the messages that were queued but never delivered (the run ended first). */
+  drainQueuedMessages(): string[] {
+    return this.pendingMessages.splice(0, this.pendingMessages.length);
   }
 
   /** The learned retry policy for a tool, if the store has a workflow recommendation. */
@@ -856,8 +890,14 @@ export class AgentRuntime implements AgentExecutor {
     return best;
   }
 
+  /**
+   * Release resources. A runtime built on a store it was handed (`store`) does
+   * **not** own it: closing it would close the caller's memory — precisely what a
+   * delegated child must not do to its parent (`AdaptiveRuntime.close()` closes
+   * the store unconditionally, so the ownership decision has to live here).
+   */
   close(): void {
-    this.adaptive.close();
+    if (this.ownsStore) this.adaptive.close();
   }
 }
 

@@ -70,6 +70,11 @@ export interface CliArgs {
   version: boolean;
   /** Config file (YAML or JSON) for repeatable runs; flags override it. */
   config?: string;
+  /**
+   * Expose delegation: a `task` tool that runs a sub-agent in its own session and
+   * returns only its result. Off by default — it multiplies model work.
+   */
+  task: boolean;
 }
 
 /**
@@ -117,6 +122,7 @@ const DEFAULT_ARGS: CliArgs = {
   verbose: false,
   help: false,
   version: false,
+  task: false,
 };
 
 /**
@@ -243,6 +249,9 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
       case "--version":
       case "-V":
         args.version = true;
+        break;
+      case "--task":
+        args.task = true;
         break;
       default:
         // A bare word is the positional prompt shorthand; anything else that
@@ -419,6 +428,8 @@ Options:
   --default-risk <level>        Risk for tools whose server sends no MCP annotations
                                 (low|medium|high|none; default medium)
   --await-jobs                  Poll long-running tool jobs (job handles) to completion
+  --task                        Expose delegation: a "task" tool that runs a sub-agent in
+                                its own session and returns only its result
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
