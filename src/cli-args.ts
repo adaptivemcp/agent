@@ -39,6 +39,12 @@ export interface CliArgs {
   baseUrl?: string;
   apiKey?: string;
   servers: string[];
+  /**
+   * Skill directories to load (repeatable). Each holds `<name>/SKILL.md`; the
+   * prompt carries the names and descriptions, and the body is read on demand.
+   * `./skills` is added automatically when it exists.
+   */
+  skills: string[];
   /** Local fallback risk for tools whose server ships no MCP annotations. */
   defaultRisk: "low" | "medium" | "high" | "none";
   /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
@@ -95,6 +101,7 @@ export function parseTierList(raw: string, source: string): System1Tier[] {
 
 const DEFAULT_ARGS: CliArgs = {
   servers: [],
+  skills: [],
   listTools: false,
   interactive: false,
   defaultRisk: "medium",
@@ -166,6 +173,9 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         break;
       case "--server":
         (args.servers ??= []).push(next());
+        break;
+      case "--skills":
+        (args.skills ??= []).push(next());
         break;
       case "--default-risk": {
         const value = next();
@@ -392,6 +402,9 @@ Usage:
 Options:
   --server <name=command args>  MCP server over stdio (repeatable)
                                 (default: the sibling adaptive-mcp example server)
+  --skills <dir>                Skills directory: <name>/SKILL.md per skill (repeatable;
+                                ./skills is added when it exists). Only names and
+                                descriptions enter the prompt; bodies load on demand
   --prompt <text>               One-shot prompt instead of the interactive REPL
   -i, --interactive             Force the interactive REPL
   --model <id>                  Pin one catalog model (disables adaptive selection)

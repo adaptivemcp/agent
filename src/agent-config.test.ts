@@ -52,6 +52,12 @@ describe("loadAgentConfig", () => {
     expect(loadAgentConfig(write("a.yaml", 'servers: "x=cmd"')).servers).toEqual(["x=cmd"]);
   });
 
+  it("accepts skills as a string or a list", () => {
+    expect(loadAgentConfig(write("s.yaml", 'skills: "skills"')).skills).toEqual(["skills"]);
+    expect(loadAgentConfig(write("s2.yaml", "skills:\n  - a\n  - b")).skills).toEqual(["a", "b"]);
+    expect(() => loadAgentConfig(write("s3.yaml", "skills: 5"))).toThrow(/skills/);
+  });
+
   it("treats an empty file as no options", () => {
     expect(loadAgentConfig(write("empty.yaml", ""))).toEqual({});
   });

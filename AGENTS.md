@@ -93,6 +93,15 @@ several keys for the same provider/model (`OPENAI_API_KEY`, `OPENAI_API_KEY_2`,
 them. The System One decision layer (`src/decision/`) is a separate, local,
 non-chat HTTP seam — never a `ChatModel`.
 
+**Skills** (`src/skills.ts`) are host-owned instructions, not a protocol concept
+(ADR-004): a directory of `<name>/SKILL.md` files, discovered from `--skills <dir>`
+(plus the `./skills` convention) and exposed to the model as an ordinary toolset
+(`skillsToolset`, namespaced `skills_*`), so reading one goes through
+`AgentRuntime.execute` like any MCP tool. Only `name`/`description` enter the
+system prompt — progressive disclosure — and the body is fetched on demand; the
+read tool is confined to the skill's own directory, and a malformed `SKILL.md` is
+warned about and skipped rather than failing the run.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

@@ -90,26 +90,32 @@ skill; "read a file" is a tool.
 
 ## Our coverage
 
-| Component                                     | Status | Evidence                   |
-| --------------------------------------------- | ------ | -------------------------- |
-| `SKILL.md` definition + trigger description   | ❌     | no skill concept in `src/` |
-| Progressive disclosure                        | ❌     | —                          |
-| Discovery (user / project / remote)           | ❌     | —                          |
-| Supply chain (fetch / cache / version)        | ❌     | —                          |
-| Invocation (context injection vs sub-session) | ❌     | —                          |
+| Component                                     | Status | Evidence                                                                                                        |
+| --------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+| `SKILL.md` definition + trigger description   | ✅     | `src/skills.ts`: frontmatter `name`/`description`, the `description` used as the trigger                        |
+| Progressive disclosure                        | ✅     | the prompt carries names + descriptions only; the body loads through `skills_read_skill`, bundled files by name |
+| Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable) plus the `./skills` convention; no user-level default, nothing remote             |
+| Supply chain (fetch / cache / version)        | ❌     | local directories only — nothing is fetched, so nothing needs signing                                           |
+| Invocation (context injection vs sub-session) | 🟡     | the body lands in the current context as a tool result; no isolated sub-session                                 |
 
-`grep -ril skill src/` returns nothing: today the agent's only "skills" are MCP
-**tools**, and its system prompt is assembled from a fixed server inventory plus
-learned context.
+The loader is deliberately outside the runtime: a skill set becomes an ordinary
+**toolset** (`skillsToolset`), so reading one takes the same path as any MCP tool
+— approval gate, telemetry, execution graph — and no protocol noun was added
+(ADR-004). A malformed `SKILL.md` warns and is skipped rather than failing the
+run, and the read tool cannot leave a skill's directory.
 
 ## Gap
 
 Skills are a **document format plus a loader**, not a runtime:
 
 1. **Definition + discovery** — a `skills/` convention (project + user),
-   frontmatter parsing, and the `description`-as-trigger rule.
+   frontmatter parsing, and the `description`-as-trigger rule. **Done:**
+   `src/skills.ts` + `--skills` / `./skills`; a user-level default directory is
+   still missing.
 2. **Progressive disclosure** — expose only `name` + `description` up front; load
    the body on selection; expose `reference/` only when the procedure asks.
+   **Done:** the prompt lists names + descriptions, and `skills_read_skill` reads
+   the body or one named bundled file.
 3. **Supply chain** — if we ever pull skills remotely, cache + version them, and
    never execute anything at discovery time.
 
