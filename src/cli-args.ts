@@ -62,6 +62,8 @@ export interface CliArgs {
   help: boolean;
   /** Print the version and exit. */
   version: boolean;
+  /** Config file (YAML or JSON) for repeatable runs; flags override it. */
+  config?: string;
 }
 
 /**
@@ -91,25 +93,31 @@ export function parseTierList(raw: string, source: string): System1Tier[] {
   return tiers as System1Tier[];
 }
 
-export function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    servers: [],
-    listTools: false,
-    interactive: false,
-    defaultRisk: "medium",
-    awaitJobs: false,
-    noStream: false,
-    autoApprove: false,
-    context: true,
-    compress: false,
-    report: false,
-    serverPolicy: true,
-    noOllama: false,
-    system1: false,
-    verbose: false,
-    help: false,
-    version: false,
-  };
+const DEFAULT_ARGS: CliArgs = {
+  servers: [],
+  listTools: false,
+  interactive: false,
+  defaultRisk: "medium",
+  awaitJobs: false,
+  noStream: false,
+  autoApprove: false,
+  context: true,
+  compress: false,
+  report: false,
+  serverPolicy: true,
+  noOllama: false,
+  system1: false,
+  verbose: false,
+  help: false,
+  version: false,
+};
+
+/**
+ * Parse argv into only the options actually present, without applying the
+ * defaults, so a config file can be merged underneath the flags (flags win).
+ */
+export function parseFlags(argv: string[]): Partial<CliArgs> {
+  const args: Partial<CliArgs> = {};
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const next = (): string => {
@@ -127,6 +135,10 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       case "--models":
         args.models = next();
+        break;
+      case "--config":
+      case "-c":
+        args.config = next();
         break;
       case "--no-ollama":
         args.noOllama = true;
@@ -153,7 +165,7 @@ export function parseArgs(argv: string[]): CliArgs {
         args.apiKey = next();
         break;
       case "--server":
-        args.servers.push(next());
+        (args.servers ??= []).push(next());
         break;
       case "--default-risk": {
         const value = next();
@@ -233,6 +245,19 @@ export function parseArgs(argv: string[]): CliArgs {
     }
   }
   return args;
+}
+
+/**
+ * Merge the configuration layers: built-in defaults, then a config file, then
+ * the flags (flags win). Pure, so the caller loads the config file itself.
+ */
+export function resolveArgs(flags: Partial<CliArgs>, config: Partial<CliArgs> = {}): CliArgs {
+  return { ...DEFAULT_ARGS, ...config, ...flags };
+}
+
+/** Parse argv and apply the defaults (the historical, config-free API). */
+export function parseArgs(argv: string[]): CliArgs {
+  return resolveArgs(parseFlags(argv));
 }
 
 /**
@@ -371,6 +396,7 @@ Options:
   -i, --interactive             Force the interactive REPL
   --model <id>                  Pin one catalog model (disables adaptive selection)
   --models <file>               Catalog file of model integrations (JSON)
+  -c, --config <file>           Config file (YAML or JSON); flags override it
   --no-ollama                   Don't auto-discover models from a local Ollama
   --system1                     Enable the System One fast decision layer (Ollama or OpenAI)
   --system1-model <id>          System One model (default: $SYSTEM1_MODEL, tev1:0.8b)

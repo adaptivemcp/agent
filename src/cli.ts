@@ -20,13 +20,15 @@ import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/
 import { discoverOllamaIntegrations } from "./models/ollama.js";
 import { ExitCode } from "./exit-codes.js";
 import {
-  parseArgs,
+  parseFlags,
+  resolveArgs,
   printHelp,
   resolveSystem1,
   System1TierError,
   type CliArgs,
   type System1Selection,
 } from "./cli-args.js";
+import { loadAgentConfig } from "./agent-config.js";
 import { jobPollingMiddleware } from "./jobs.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatModel } from "./types.js";
@@ -34,7 +36,9 @@ import type { ChatModel } from "./types.js";
 async function main(): Promise<void> {
   let args: CliArgs;
   try {
-    args = parseArgs(process.argv.slice(2));
+    const flags = parseFlags(process.argv.slice(2));
+    const config = flags.config ? loadAgentConfig(flags.config) : {};
+    args = resolveArgs(flags, config);
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     printHelp();
