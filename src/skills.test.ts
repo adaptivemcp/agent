@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SKILL_FILE, discoverSkills, skillsPrompt, skillsToolset } from "./skills.js";
+import {
+  SKILL_FILE,
+  agentDefinition,
+  discoverSkills,
+  skillsPrompt,
+  skillsToolset,
+} from "./skills.js";
 
 /** Write `<root>/<name>/SKILL.md` and return its directory. */
 function makeSkill(
@@ -180,6 +186,67 @@ describe("skills", () => {
       const toolset = skillsToolset(discoverSkills([root]));
       expect((await toolset.callTool("write_skill", {})).ok).toBe(false);
       await toolset.close();
+    });
+  });
+
+  describe("tool policy — a skill that is also an agent definition", () => {
+    /** A SKILL.md with whatever frontmatter the test needs. */
+    function writeSkill(name: string, frontmatter: string, body = "Do the thing."): void {
+      const dir = join(root, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, SKILL_FILE), `---\n${frontmatter}\n---\n\n${body}\n`);
+    }
+
+    it("reads tools and deny from the frontmatter", () => {
+      writeSkill(
+        "reviewer",
+        "name: reviewer\ndescription: reads only\ntools:\n  - search_customer\ndeny:\n  - deploy_service",
+      );
+
+      const [skill] = discoverSkills([root]);
+
+      expect(skill?.tools).toEqual(["search_customer"]);
+      expect(skill?.deny).toEqual(["deploy_service"]);
+    });
+
+    it("treats a malformed tool policy as a hard error, never as 'unrestricted'", () => {
+      // `tools: search_customer` (a string, not a list) is a typo, and silently
+      // ignoring it would mean the opposite of what the author asked for.
+      writeSkill("typo", "name: typo\ndescription: d\ntools: search_customer");
+      const warnings: string[] = [];
+
+      const skills = discoverSkills([root], (message) => warnings.push(message));
+
+      expect(skills).toEqual([]);
+      expect(warnings).toHaveLength(1);
+    });
+
+    it("leaves the policy absent for an ordinary skill", () => {
+      makeSkill(root, "plain", "no policy");
+
+      const [skill] = discoverSkills([root]);
+
+      expect(skill?.tools).toBeUndefined();
+      expect(skill?.deny).toBeUndefined();
+    });
+
+    it("exposes a skill as an agent definition, with its instructions", () => {
+      const dir = join(root, "reviewer");
+      mkdirSync(dir);
+      writeFileSync(
+        join(dir, SKILL_FILE),
+        "---\nname: reviewer\ndescription: reads only\ntools:\n  - search_customer\n---\n\nRead, then report.\n",
+      );
+
+      const definition = agentDefinition(discoverSkills([root])[0]!);
+
+      expect(definition).toEqual({
+        name: "reviewer",
+        description: "reads only",
+        instructions: "Read, then report.",
+        tools: ["search_customer"],
+        deny: undefined,
+      });
     });
   });
 

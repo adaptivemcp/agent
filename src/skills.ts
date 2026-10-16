@@ -37,6 +37,29 @@ export interface Skill {
   dir: string;
   /** Files bundled with the skill (relative paths), for the third disclosure level. */
   files: string[];
+  /**
+   * Tools a **delegated run** of this skill may use (a bare name, or a full
+   * namespaced one). Absent means "no allowlist" — the child gets whatever its
+   * parent has. An allowlist can only narrow: it can never grant a tool the
+   * parent lacks.
+   */
+  tools?: string[];
+  /** Tools a delegated run of this skill must **not** use, on top of the parent's policy. */
+  deny?: string[];
+}
+
+/**
+ * A skill's tool policy, as delegation consumes it. Declared in `SKILL.md`
+ * frontmatter — one convention, not two: a skill is instructions, and an *agent
+ * definition* is a skill that also says what it may use.
+ */
+export interface AgentDefinition {
+  name: string;
+  description: string;
+  /** The skill's body: the child's instructions. */
+  instructions: string;
+  tools?: string[];
+  deny?: string[];
 }
 
 /**
@@ -83,6 +106,8 @@ export function discoverSkills(
         description: parsed.description,
         dir: root,
         files: listSkillFiles(root),
+        tools: parsed.tools,
+        deny: parsed.deny,
       });
     }
   }
@@ -171,7 +196,11 @@ export function skillsToolset(skills: Skill[]): Toolset {
 }
 
 /** Split a `SKILL.md` into its frontmatter and body, or `undefined` if malformed. */
-function parseSkill(text: string): { name: string; description: string; body: string } | undefined {
+function parseSkill(
+  text: string,
+):
+  | { name: string; description: string; body: string; tools?: string[]; deny?: string[] }
+  | undefined {
   if (!text.startsWith("---")) return undefined;
   const end = text.indexOf("\n---", 3);
   if (end === -1) return undefined;
@@ -182,10 +211,60 @@ function parseSkill(text: string): { name: string; description: string; body: st
     return undefined;
   }
   if (typeof meta !== "object" || meta === null) return undefined;
-  const { name, description } = meta as { name?: unknown; description?: unknown };
+  const { name, description, tools, deny } = meta as {
+    name?: unknown;
+    description?: unknown;
+    tools?: unknown;
+    deny?: unknown;
+  };
   if (typeof name !== "string" || !name.trim()) return undefined;
   if (typeof description !== "string" || !description.trim()) return undefined;
-  return { name: name.trim(), description: description.trim(), body: text.slice(end + 4).trim() };
+  // A malformed tool policy is a hard error, not something to ignore: `tools:`
+  // with a typo would otherwise silently mean "unrestricted", which is the
+  // opposite of what the author asked for.
+  const allow = readNameList(tools);
+  const blocked = readNameList(deny);
+  if (allow === null || blocked === null) return undefined;
+  return {
+    name: name.trim(),
+    description: description.trim(),
+    body: text.slice(end + 4).trim(),
+    tools: allow,
+    deny: blocked,
+  };
+}
+
+/** A frontmatter tool list: `undefined` when absent, `null` when malformed. */
+function readNameList(value: unknown): string[] | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return null;
+  const names: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !entry.trim()) return null;
+    names.push(entry.trim());
+  }
+  return names.length > 0 ? names : undefined;
+}
+
+/**
+ * A skill as an agent definition: what a delegated child needs (its instructions
+ * and its tool policy). Reads the body, which the read *tool* does lazily.
+ */
+export function agentDefinition(skill: Skill): AgentDefinition {
+  let instructions = "";
+  try {
+    const parsed = parseSkill(readFileSync(join(skill.dir, SKILL_FILE), "utf8"));
+    instructions = parsed?.body ?? "";
+  } catch {
+    // A skill that vanished between discovery and use simply has no instructions.
+  }
+  return {
+    name: skill.name,
+    description: skill.description,
+    instructions,
+    tools: skill.tools,
+    deny: skill.deny,
+  };
 }
 
 /** The skill's bundled files (relative, `/`-separated), breadth-capped. */

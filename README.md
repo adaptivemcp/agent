@@ -95,7 +95,11 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   even under `--yes`, and it does not receive the `task` tool itself, so
   delegation cannot recurse. `background: true` returns immediately and reports
   once on completion — the parent is told not to poll, and the result arrives as a
-  steering message on its next step.
+  steering message on its next step. Pass `agent: "<name>"` to delegate to a
+  **named specialist**: a skill whose frontmatter declares `tools`/`deny` becomes
+  an agent definition, and the child gets the intersection of its parent's tools
+  and that policy — an allowlist can only narrow, never grant. An unknown name
+  fails the call rather than quietly acting as a generalist.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool

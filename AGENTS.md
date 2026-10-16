@@ -112,7 +112,10 @@ warned about and skipped rather than failing the run.
 **Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
 sub-agent that runs in its own session and returns only its result. Two rules
 bound it — the child never auto-approves (delegation must not amplify authority)
-and it never receives the `task` tool itself (recursion is bounded). Its
+and it never receives the `task` tool itself (recursion is bounded). A **named
+agent** is a skill whose frontmatter declares `tools`/`deny`: `narrowTools`
+intersects it with the parent's list, so a definition can only narrow, and an
+unknown name fails the call rather than quietly acting as a generalist. Its
 completion notifications arrive through `AgentRuntime.queueMessage`, which
 `review()` drains one step at a time.
 

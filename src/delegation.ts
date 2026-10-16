@@ -19,6 +19,7 @@
  *   tool description and learns the result once, through a notification.
  */
 import { sanitize, type McpToolResult, type Toolset } from "./mcp/toolset.js";
+import type { AgentDefinition } from "./skills.js";
 import type { ToolSpec } from "./types.js";
 
 /** The tool a parent calls to delegate (the aggregate namespaces it `delegate_task`). */
@@ -48,12 +49,37 @@ export interface SubagentResult {
 export interface DelegationOptions {
   /** The parent session id; children are named under it. */
   session: string;
-  /** Run one child to completion. `sessionId` is the child's isolated session. */
-  run: (task: SubagentTask, sessionId: string) => Promise<SubagentResult>;
+  /**
+   * The parent's tools, delegation tool included — read at **call** time, because
+   * the toolset joins the aggregate before the tool list exists. Narrowed per
+   * child.
+   */
+  tools: () => ToolSpec[];
+  /** The namespaced name of the delegation tool itself (never given to a child). */
+  taskToolName: string;
+  /**
+   * Skills that also declare a tool policy, so `agent` can name a *definition*
+   * rather than a bare label. Discovered by `src/skills.ts`; a definition can only
+   * narrow the child.
+   */
+  agents?: AgentDefinition[];
+  /** Run one child to completion. `context.tools` is what the child may use. */
+  run: (
+    task: SubagentTask,
+    sessionId: string,
+    context: DelegationContext,
+  ) => Promise<SubagentResult>;
   /** Where a background child's completion is announced to the parent. */
   notify?: (message: string) => void;
   /** How many children may run at once in the background (default 2). */
   maxBackground?: number;
+}
+
+export interface DelegationContext {
+  /** The agent definition this child was given, when it named one. */
+  definition?: AgentDefinition;
+  /** The tools the child may use: the parent's, narrowed. */
+  tools: ToolSpec[];
 }
 
 /**
@@ -68,11 +94,38 @@ export function subagentApproval(): (toolName: string) => boolean {
 }
 
 /**
- * The tools a child may use: the parent's, minus delegation itself. Without this
- * the recursion is unbounded — each child could spawn children.
+ * The tools a child may use: the parent's, narrowed by the child's definition and
+ * never widened by it. Two rules hold by construction:
+ *
+ * - the delegation tool is always removed, so recursion is bounded — a child
+ *   cannot spawn children;
+ * - an allowlist is a **filter** over the parent's tools, so naming a tool the
+ *   parent lacks grants nothing.
+ *
+ * A definition names tools bare (`search_customer`) or fully namespaced
+ * (`adaptive_search_customer`); a bare name matches a namespaced tool whose name
+ * ends in `_<name>`, which is how the aggregate namespaces MCP servers.
  */
-export function delegatableTools(tools: ToolSpec[], taskToolName: string): ToolSpec[] {
-  return tools.filter((spec) => spec.name !== taskToolName);
+export function narrowTools(
+  parentTools: ToolSpec[],
+  definition: AgentDefinition | undefined,
+  taskToolName: string,
+): ToolSpec[] {
+  let allowed = parentTools.filter((spec) => spec.name !== taskToolName);
+  if (definition?.tools?.length) {
+    const allowlist = definition.tools;
+    allowed = allowed.filter((spec) => allowlist.some((name) => namesTool(spec.name, name)));
+  }
+  if (definition?.deny?.length) {
+    const denylist = definition.deny;
+    allowed = allowed.filter((spec) => !denylist.some((name) => namesTool(spec.name, name)));
+  }
+  return allowed;
+}
+
+/** Whether a spec name is the given tool, bare or under a server prefix. */
+function namesTool(specName: string, name: string): boolean {
+  return specName === name || specName.endsWith(`_${name}`);
 }
 
 /** The session a child runs in: named under the parent, so the graph reads as a tree. */
@@ -85,6 +138,7 @@ const TASK_DESCRIPTION = [
   "Delegate a self-contained task to a sub-agent that runs in its own session and returns only its result.",
   "Use it for separable work that would flood this conversation (a broad search, a long review).",
   "The sub-agent cannot see this conversation: put everything it needs in `prompt`.",
+  "Pass `agent` to delegate to a named specialist, which may use only the tools its skill allows.",
   "A background task returns immediately — then do NOT poll for progress, ask for its status, or duplicate",
   "its work in the meantime; you will be told when it finishes.",
 ].join(" ");
@@ -97,11 +151,16 @@ const TASK_DESCRIPTION = [
 export function taskToolset(options: DelegationOptions): Toolset {
   const maxBackground = options.maxBackground ?? 2;
   const running = new Set<Promise<void>>();
+  const agents = new Map((options.agents ?? []).map((agent) => [agent.name, agent]));
   let issued = 0;
 
-  const start = async (task: SubagentTask, sessionId: string): Promise<SubagentResult> => {
+  const start = async (
+    task: SubagentTask,
+    sessionId: string,
+    context: DelegationContext,
+  ): Promise<SubagentResult> => {
     try {
-      return await options.run(task, sessionId);
+      return await options.run(task, sessionId, context);
     } catch (error) {
       return {
         status: "failed",
@@ -130,7 +189,9 @@ export function taskToolset(options: DelegationOptions): Toolset {
               },
               agent: {
                 type: "string",
-                description: "Optional specialist label for the sub-agent.",
+                description:
+                  "Optional specialist: a skill that declares which tools the sub-agent may " +
+                  "use. An unknown name fails the call.",
               },
               background: {
                 type: "boolean",
@@ -149,10 +210,30 @@ export function taskToolset(options: DelegationOptions): Toolset {
       const parsed = readTask(input);
       if ("error" in parsed) return { ok: false, error: parsed.error };
       const task = parsed.task;
+
+      // Resolve the named specialist *before* spawning: an unknown name is a
+      // caller mistake worth reporting, not something to paper over by acting as
+      // a generalist.
+      const definition = task.agent ? agents.get(task.agent) : undefined;
+      if (task.agent && !definition) {
+        const available = [...agents.keys()].sort();
+        return {
+          ok: false,
+          error:
+            `unknown agent "${task.agent}"` +
+            (available.length > 0
+              ? `; available: ${available.join(", ")}`
+              : " (no skill declares a tool policy)"),
+        };
+      }
+      const context: DelegationContext = {
+        definition,
+        tools: narrowTools(options.tools(), definition, options.taskToolName),
+      };
       const sessionId = childSessionId(options.session, task, (issued += 1));
 
       if (!task.background) {
-        const result = await start(task, sessionId);
+        const result = await start(task, sessionId, context);
         return result.status === "completed"
           ? { ok: true, output: result }
           : { ok: false, error: result.summary, output: result };
@@ -166,7 +247,7 @@ export function taskToolset(options: DelegationOptions): Toolset {
           error: `${running.size} background tasks are already running (max ${maxBackground}); wait for one to finish`,
         };
       }
-      const promise = start(task, sessionId)
+      const promise = start(task, sessionId, context)
         .then((result) => options.notify?.(describeCompletion(task, result)))
         .finally(() => running.delete(promise));
       running.add(promise);

@@ -33,15 +33,21 @@ import { loadAgentConfig } from "./agent-config.js";
 import { jobPollingMiddleware } from "./jobs.js";
 import {
   TASK_TOOL,
-  delegatableTools,
   subagentApproval,
   taskToolset,
+  type DelegationContext,
   type SubagentResult,
   type SubagentTask,
 } from "./delegation.js";
-import { discoverSkills, skillsPrompt, skillsToolset } from "./skills.js";
+import {
+  agentDefinition,
+  discoverSkills,
+  skillsPrompt,
+  skillsToolset,
+  type AgentDefinition,
+} from "./skills.js";
 import { renderOneShot, stringify } from "./render.js";
-import type { ChatMessage, ChatModel } from "./types.js";
+import type { ChatMessage, ChatModel, ToolSpec } from "./types.js";
 
 async function main(): Promise<void> {
   let args: CliArgs;
@@ -153,16 +159,29 @@ async function main(): Promise<void> {
   // runtime, the run config — only exist inside the run below.
   let notifyParent: (message: string) => void = () => {};
   let drainNotifications: () => void = () => {};
-  let runChild: ((task: SubagentTask, childSession: string) => Promise<SubagentResult>) | undefined;
+  let parentSpecs: ToolSpec[] = [];
+  let runChild:
+    | ((
+        task: SubagentTask,
+        childSession: string,
+        context: DelegationContext,
+      ) => Promise<SubagentResult>)
+    | undefined;
   const toolsetList: Toolset[] = [...toolsets];
   if (skills.length > 0) toolsetList.push(skillsToolset(skills));
   if (args.task) {
     toolsetList.push(
       taskToolset({
         session: sessionId,
-        run: (task, childSession) => {
+        // Read at call time: the list does not exist until the aggregate is asked.
+        tools: () => parentSpecs,
+        taskToolName: `${sanitize("delegate")}_${sanitize(TASK_TOOL)}`,
+        // A skill that declares a tool policy doubles as an agent definition, so
+        // `agent` can name a specialist rather than a bare label.
+        agents: skills.map(agentDefinition),
+        run: (task, childSession, context) => {
           if (!runChild) return Promise.reject(new Error("delegation is not wired yet"));
-          return runChild(task, childSession);
+          return runChild(task, childSession, context);
         },
         notify: (message) => notifyParent(message),
       }),
@@ -204,6 +223,7 @@ async function main(): Promise<void> {
 
   try {
     const specs = await tools.listTools();
+    parentSpecs = specs; // delegation narrows from this, at call time
     if (args.listTools) {
       for (const spec of specs) {
         console.log(`${spec.name}\t${spec.serverName ?? ""}\t${spec.description ?? ""}`);
@@ -364,9 +384,11 @@ async function main(): Promise<void> {
     // conversation, and only its final answer goes back. It shares the parent's
     // store, so its calls land in the same graph and learned state.
     if (args.task) {
-      const taskToolName = `${sanitize("delegate")}_${sanitize(TASK_TOOL)}`;
-      const childTools = delegatableTools(specs, taskToolName);
-      runChild = async (task: SubagentTask, childSession: string): Promise<SubagentResult> => {
+      runChild = async (
+        task: SubagentTask,
+        childSession: string,
+        context: DelegationContext,
+      ): Promise<SubagentResult> => {
         const child = new AgentRuntime({
           store: runtime.adaptive.memory,
           sessionId: childSession,
@@ -383,10 +405,12 @@ async function main(): Promise<void> {
           const result = await runAgent({
             ...runConfig,
             executor: child,
-            tools: childTools,
+            // What this child may use: the parent's tools, narrowed by its
+            // definition (never widened by it).
+            tools: context.tools,
             maxSteps: TASK_MAX_STEPS,
             messages: [
-              { role: "system", content: subagentSystem(systemWithServers) },
+              { role: "system", content: subagentSystem(systemWithServers, context.definition) },
               { role: "user", content: task.prompt },
             ],
             onEvent: args.verbose ? (event) => renderOneShot(event, true) : undefined,
@@ -483,14 +507,17 @@ function skillDirs(args: CliArgs): string[] {
 const TASK_MAX_STEPS = 6;
 
 /** The child's system prompt: the parent's environment, framed as a delegate. */
-function subagentSystem(environment: string): string {
-  return [
+function subagentSystem(environment: string, definition?: AgentDefinition): string {
+  const parts = [
     "You are a sub-agent. Another agent delegated exactly one task to you, and you cannot see its conversation.",
     "Use the tools you have, then reply with your result: what you found or did, and everything the caller needs to know.",
     "Your reply is the only thing the caller receives, so make it self-contained and concrete.",
-    "",
-    environment,
-  ].join("\n");
+  ];
+  if (definition) {
+    parts.push(`You are acting as "${definition.name}":\n\n${definition.instructions}`);
+  }
+  parts.push("", environment);
+  return parts.join("\n");
 }
 
 /** The last assistant text — what a delegated child hands back to its caller. */

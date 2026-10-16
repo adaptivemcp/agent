@@ -96,7 +96,7 @@ skill; "read a file" is a tool.
 | Progressive disclosure                        | ✅     | the prompt carries names + descriptions only; the body loads through `skills_read_skill`, bundled files by name |
 | Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable) plus the `./skills` convention; no user-level default, nothing remote             |
 | Supply chain (fetch / cache / version)        | ❌     | local directories only — nothing is fetched, so nothing needs signing                                           |
-| Invocation (context injection vs sub-session) | 🟡     | the body lands in the current context as a tool result; no isolated sub-session                                 |
+| Invocation (context injection vs sub-session) | ✅     | both, explicitly: the body enters the current context via `skills_read_skill`, or the skill runs as an isolated sub-session when a `task` names it (`agent`), where its `tools`/`deny` narrows what that child may use |
 
 The loader is deliberately outside the runtime: a skill set becomes an ordinary
 **toolset** (`skillsToolset`), so reading one takes the same path as any MCP tool

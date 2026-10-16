@@ -129,7 +129,7 @@ modules), or when different parts need different tools/permissions.
 | ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Delegation tool                      | ✅     | `delegation.ts`: a `task` tool with `description`/`prompt`/`agent`/`background`, exposed under `--task`                               |
 | Sub-agent session isolation          | ✅     | the child gets its own `<parent>/task[-<agent>]-<n>` session and returns a result, never its transcript                               |
-| Derived permissions                  | 🟡     | a child never auto-approves and never gets the `task` tool; policy can only narrow, but nothing else narrows (no per-agent tool sets) |
+| Derived permissions                  | ✅     | a child never auto-approves, never gets `task`, and a named agent's `tools`/`deny` is intersected with the parent's (`narrowTools`) — narrowing only, by construction |
 | Foreground / background              | ✅     | foreground blocks; background returns immediately and reports once via `queueMessage` (bounded concurrency)                           |
 | Shared task list                     | ❌     | —                                                                                                                                     |
 | Orchestration modes                  | ❌     | —                                                                                                                                     |
@@ -148,10 +148,10 @@ independent halves:
 
 1. **Delegation** — a `task`-shaped tool, an isolated child session, derived
    (narrowed) permissions, and a foreground/background contract with notification.
-   **Done** (`delegation.ts`, #36): the tool, the isolated session, the
-   foreground/background contract, and the anti-escalation rule. What is _not_ yet
-   there is the rest of the permission model — named sub-agents with their own tool
-   sets and prompts (today `agent` is a label naming the child's session).
+   **Done** (`delegation.ts`, #36 + #52): the tool, the isolated session, the
+   foreground/background contract, the anti-escalation rule, and named agents — a
+   skill whose frontmatter declares `tools`/`deny` is an agent definition, and the
+   child gets the intersection of its parent's tools and that policy.
 2. **A shared task list** — the `Task`/`TaskList` model with dependencies, plus the
    named orchestration modes, so the leader has something to plan against. Open
    (#37, #39).
