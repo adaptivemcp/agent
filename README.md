@@ -73,7 +73,10 @@ generated; tool calls and results print underneath. Commands: `/tools`,
 
 - **Approvals.** Tools the gate marks `require_confirmation` — high-risk from the
   server's standard MCP annotations, or learned-flaky — prompt
-  `approve <tool>? — <reason> (y/N)` in the REPL. `--yes` auto-approves.
+  `approve <tool>? — <reason> (y/N)` in the REPL. **In a non-interactive run
+  there is nobody to ask, so such a tool is denied (fail closed)** — the tool
+  does not run, the call is recorded as a failure, and the run exits `4`. Pass
+  `--yes` to auto-approve instead; that is the only way to opt in.
 - **Learned context.** Before each turn the agent injects a compact summary of
   observed tool reliability/insights into the system prompt (progressive
   disclosure of evaluation output); `--no-context` disables it.

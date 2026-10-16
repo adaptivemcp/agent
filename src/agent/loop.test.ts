@@ -6,7 +6,16 @@ import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
 import { runAgent } from "./loop.js";
-import type { AgentEvent, AgentExecutor, ChatMessage, ChatModel, ChatParams, ChatStep, ToolCall, ToolSpec } from "../types.js";
+import type {
+  AgentEvent,
+  AgentExecutor,
+  ChatMessage,
+  ChatModel,
+  ChatParams,
+  ChatStep,
+  ToolCall,
+  ToolSpec,
+} from "../types.js";
 
 /** Wraps a model to capture the params the loop passes to each completion. */
 class RecordingModel implements ChatModel {
@@ -79,6 +88,10 @@ async function runtimeFor(tools: InMemoryToolset, sessionId = "s1"): Promise<Age
   return new AgentRuntime({
     dbPath: ":memory:",
     sessionId,
+    // These tests exercise the loop, not the gate, so they opt in to
+    // auto-approval explicitly — the runtime's default is now to deny a
+    // `require_confirmation` tool (fail closed).
+    requestApproval: () => true,
     invoke: (name, input) => tools.callTool(name, input),
   });
 }
@@ -120,7 +133,12 @@ class PricedToolModel implements ChatModel {
         usage: { inputTokens: 1000, outputTokens: 500 },
       };
     }
-    return { text: "done", toolCalls: [], finishReason: "stop", usage: { inputTokens: 10, outputTokens: 5 } };
+    return {
+      text: "done",
+      toolCalls: [],
+      finishReason: "stop",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
   }
 }
 
@@ -266,10 +284,7 @@ describe("agent loop", () => {
     }
 
     const model = new RecordingModel(
-      new ScriptedModel([
-        { toolCalls: [{ name: "deploy_service", input: {} }] },
-        { text: "done" },
-      ]),
+      new ScriptedModel([{ toolCalls: [{ name: "deploy_service", input: {} }] }, { text: "done" }]),
     );
     const events: AgentEvent[] = [];
     await runAgent({
@@ -325,7 +340,10 @@ describe("agent loop", () => {
     });
 
     const deltas = events
-      .filter((event): event is Extract<AgentEvent, { type: "text_delta" }> => event.type === "text_delta")
+      .filter(
+        (event): event is Extract<AgentEvent, { type: "text_delta" }> =>
+          event.type === "text_delta",
+      )
       .map((event) => event.text)
       .join("");
     expect(deltas).toBe("hello");
@@ -379,9 +397,9 @@ describe("agent loop", () => {
     });
 
     expect(events.some((event) => event.type === "text_delta")).toBe(false);
-    expect(
-      events.some((event) => event.type === "assistant_text" && event.text === "whole"),
-    ).toBe(true);
+    expect(events.some((event) => event.type === "assistant_text" && event.text === "whole")).toBe(
+      true,
+    );
 
     runtime.close();
     await tools.close();
@@ -414,7 +432,10 @@ describe("agent loop", () => {
     expect(turn.toolName).toBe("agent_turn_0");
     expect(turn.childrenIds).toHaveLength(2);
     const children = turn.childrenIds.map((id) => runtime.adaptive.memory.getExecutionNode(id)!);
-    expect(children.map((child) => child.toolName).sort()).toEqual(["deploy_service", "search_customer"]);
+    expect(children.map((child) => child.toolName).sort()).toEqual([
+      "deploy_service",
+      "search_customer",
+    ]);
     for (const child of children) expect(child.parentId).toBe(turn.id);
 
     const view = runtime.graphView();
@@ -443,7 +464,9 @@ describe("agent loop", () => {
       onEvent: (event) => events.push(event),
     });
 
-    expect(events.some((event) => event.type === "model_selected" && event.model === "chosen")).toBe(true);
+    expect(
+      events.some((event) => event.type === "model_selected" && event.model === "chosen"),
+    ).toBe(true);
     expect(result.messages.at(-1)?.content).toBe("from chosen");
 
     runtime.close();
@@ -521,7 +544,12 @@ describe("agent loop", () => {
     expect(runtime.suggestModel("search_customer", { serverName: "demo" })).toBe("tuned");
 
     const catalog = new ModelCatalog([
-      { id: "tuned", provider: "openai-compatible", model: "tiny", baseURL: "http://127.0.0.1:9/v1" },
+      {
+        id: "tuned",
+        provider: "openai-compatible",
+        model: "tiny",
+        baseURL: "http://127.0.0.1:9/v1",
+      },
     ]);
     const selected = await runtime.modelProvider(catalog)({ step: 0, messages: [], tools: [] });
     expect(selected?.name).toBe("tuned");
@@ -634,7 +662,8 @@ describe("agent loop", () => {
     await tools.close();
   });
 
-  it("runs middleware around tool execution", async () => {    const tools = new InMemoryToolset("demo", [{ name: "echo", handler: () => "hello" }]);
+  it("runs middleware around tool execution", async () => {
+    const tools = new InMemoryToolset("demo", [{ name: "echo", handler: () => "hello" }]);
     const specs = await tools.listTools();
     const upper: Middleware = {
       name: "upper",
@@ -679,7 +708,9 @@ describe("agent loop", () => {
       onEvent: (event) => events.push(event),
     });
 
-    expect(events.some((event) => event.type === "guard" && event.message === "guard message")).toBe(true);
+    expect(
+      events.some((event) => event.type === "guard" && event.message === "guard message"),
+    ).toBe(true);
     expect(result.messages.some((message) => message.content === "guard message")).toBe(true);
 
     base.close();
@@ -869,7 +900,11 @@ describe("agent loop", () => {
       invoke: async () => ({ ok: true, output: { status: "error", error: "POLICY_DENIED" } }),
       onExecuted: (observation) => observations.push(observation),
     });
-    const spec: ToolSpec = { name: "qc_profile", inputSchema: { type: "object" }, serverName: "qc" };
+    const spec: ToolSpec = {
+      name: "qc_profile",
+      inputSchema: { type: "object" },
+      serverName: "qc",
+    };
 
     const result = await runtime.execute({ id: "c1", name: "qc_profile", input: {} }, spec);
 
@@ -877,6 +912,48 @@ describe("agent loop", () => {
     expect(observations[0]?.status).toBe("failed");
     expect(runtime.adaptive.memory.getTool("qc_profile", "qc")?.stats.failureRate).toBe(1);
 
+    runtime.close();
+  });
+
+  it("denies a require_confirmation tool when the runtime has no approver (fail closed)", async () => {
+    const tools = new InMemoryToolset("demo", [
+      { name: "deploy_service", description: "Deploy", handler: () => ({ ok: true }) },
+    ]);
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s1",
+      invoke: (name, input) => tools.callTool(name, input),
+    });
+    const spec: ToolSpec = { name: "deploy_service", description: "Deploy", inputSchema: {} };
+    // The gate asks on a high-risk tool. With no approver the runtime must
+    // refuse rather than run it — a permissive default used to run exactly the
+    // tools a policy had flagged for a human.
+    runtime.seedToolAnnotations([spec], { defaultRisk: "high" });
+
+    const result = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+    expect(result.ok).toBe(false);
+    expect(result.decision).toBe("require_confirmation");
+    expect(result.error).toMatch(/no approver is configured/);
+    runtime.close();
+  });
+
+  it("runs it when the host opts in explicitly", async () => {
+    const tools = new InMemoryToolset("demo", [
+      { name: "deploy_service", description: "Deploy", handler: () => ({ ok: true }) },
+    ]);
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "s1",
+      requestApproval: () => true, // what the CLI wires for --yes
+      invoke: (name, input) => tools.callTool(name, input),
+    });
+    const spec: ToolSpec = { name: "deploy_service", description: "Deploy", inputSchema: {} };
+    runtime.seedToolAnnotations([spec], { defaultRisk: "high" });
+
+    const result = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+    expect(result.ok).toBe(true);
     runtime.close();
   });
 });
