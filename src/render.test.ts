@@ -203,8 +203,8 @@ describe("createReplRenderer", () => {
   });
 
   it("applies ANSI styling only when the stream is a TTY", () => {
-    const styled = makeColor({ write: () => true, isTTY: true } as NodeJS.WriteStream);
-    const plain = makeColor({ write: () => true } as NodeJS.WriteStream);
+    const styled = makeColor({ write: () => true, isTTY: true } as unknown as NodeJS.WriteStream);
+    const plain = makeColor({ write: () => true } as unknown as NodeJS.WriteStream);
     expect(styled.dim("x")).toBe("\u001b[2mx\u001b[0m");
     expect(plain.dim("x")).toBe("x");
   });

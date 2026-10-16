@@ -96,7 +96,7 @@ describe("TieredSystemOneBackend.answer", () => {
     expect(primary.calls).toBe(1);
     expect(fallback.calls).toBe(1);
     expect(onFallback).toHaveBeenCalledTimes(1);
-    const [error, from, to] = onFallback.mock.calls[0];
+    const [error, from, to] = onFallback.mock.calls[0]!;
     expect((error as Error).message).toBe("connection refused");
     expect(from.id).toBe("local");
     expect(to.id).toBe("remote");
@@ -260,7 +260,11 @@ const CATALOG = new ModelCatalog(
 
 describe("AgentRuntime.systemOneProvider tiered composition", () => {
   it("attributes the summary to the tier that answered, including the fallback", async () => {
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "tiered-sum" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "tiered-sum",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     const onFallback = vi.fn();
     const provider = runtime.systemOneProvider(CATALOG, {
       backends: [
@@ -273,6 +277,7 @@ describe("AgentRuntime.systemOneProvider tiered composition", () => {
     });
 
     const applied = await provider({
+      step: 0,
       messages: [{ role: "user", content: "deploy" }],
       tools: [],
     });
@@ -284,12 +289,16 @@ describe("AgentRuntime.systemOneProvider tiered composition", () => {
   });
 
   it("attributes a plain single backend by its id", async () => {
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "single-sum" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "single-sum",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     const provider = runtime.systemOneProvider(CATALOG, {
       backend: fake("solo", 0, async () => CONFIDENT_RESPONSE),
     });
 
-    await provider({ messages: [{ role: "user", content: "deploy" }], tools: [] });
+    await provider({ step: 0, messages: [{ role: "user", content: "deploy" }], tools: [] });
 
     expect(runtime.lastDecisionSummary()).toContain("backend solo");
     expect(runtime.lastDecisionSummary()).not.toContain("fell back");
@@ -297,7 +306,11 @@ describe("AgentRuntime.systemOneProvider tiered composition", () => {
   });
 
   it("prefers backends over backend when both are set", async () => {
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "precedence" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "precedence",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     const provider = runtime.systemOneProvider(CATALOG, {
       backend: fake("ignored", 0, async () => {
         throw new Error("backend option must lose");
@@ -305,14 +318,18 @@ describe("AgentRuntime.systemOneProvider tiered composition", () => {
       backends: [fake("chosen", 0, async () => CONFIDENT_RESPONSE)],
     });
 
-    await provider({ messages: [{ role: "user", content: "deploy" }], tools: [] });
+    await provider({ step: 0, messages: [{ role: "user", content: "deploy" }], tools: [] });
 
     expect(runtime.lastDecisionSummary()).toContain("backend chosen");
     runtime.close();
   });
 
   it("fails fast when backends is an empty array", () => {
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "empty" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "empty",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     expect(() => runtime.systemOneProvider(CATALOG, { backends: [] })).toThrow(
       /at least one backend/,
     );

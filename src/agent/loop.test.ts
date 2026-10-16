@@ -427,17 +427,21 @@ describe("agent loop", () => {
       messages: [{ role: "user", content: "go" }],
     });
 
-    const roots = runtime.adaptive.memory.getRootNodes("s11");
+    const memory = runtime.adaptive.memory;
+    const roots = memory.getRootNodes?.("s11") ?? [];
     expect(roots).toHaveLength(1);
     const turn = roots[0]!;
     expect(turn.toolName).toBe("agent_turn_0");
     expect(turn.childrenIds).toHaveLength(2);
-    const children = turn.childrenIds.map((id) => runtime.adaptive.memory.getExecutionNode(id)!);
-    expect(children.map((child) => child.toolName).sort()).toEqual([
+    const children = turn.childrenIds.map((id) => memory.getExecutionNode?.(id));
+    // Assert existence explicitly rather than hiding it behind `!`: the graph is
+    // the thing under test.
+    expect(children.every((child) => child !== undefined)).toBe(true);
+    expect(children.map((child) => child?.toolName).sort()).toEqual([
       "deploy_service",
       "search_customer",
     ]);
-    for (const child of children) expect(child.parentId).toBe(turn.id);
+    for (const child of children) expect(child?.parentId).toBe(turn.id);
 
     const view = runtime.graphView();
     expect(view).toContain("agent_turn_0");

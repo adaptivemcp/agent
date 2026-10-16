@@ -58,18 +58,18 @@ describe("OpenAiSystemOneBackend", () => {
     const res = await backend.answer({ note: "hi" }, QUESTIONS);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://api.example.com/v1/chat/completions");
-    const headers = calls[0].init.headers as Record<string, string>;
+    expect(calls[0]!.url).toBe("https://api.example.com/v1/chat/completions");
+    const headers = calls[0]!.init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer sk-test");
     expect(headers["content-type"]).toBe("application/json");
-    const body = JSON.parse(String(calls[0].init.body)) as {
+    const body = JSON.parse(String(calls[0]!.init.body)) as {
       model: string;
       temperature: number;
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.model).toBe("gpt-4o-mini");
     expect(body.temperature).toBe(0);
-    expect(body.messages[1].content).toContain('"route"');
+    expect(body.messages[1]!.content).toContain('"route"');
 
     expect(res.model).toBe("gpt-4o-mini");
     expect(res.usage).toEqual({ input_tokens: 40, output_tokens: 12 });
@@ -85,8 +85,8 @@ describe("OpenAiSystemOneBackend", () => {
       env: { OPENAI_API_KEY: "sk-env" },
     });
     await backend.answer({}, QUESTIONS);
-    expect(calls[0].url).toBe(`${SYSTEM_ONE_REMOTE_DEFAULT_BASE_URL}/chat/completions`);
-    expect((calls[0].init.headers as Record<string, string>).authorization).toBe("Bearer sk-env");
+    expect(calls[0]!.url).toBe(`${SYSTEM_ONE_REMOTE_DEFAULT_BASE_URL}/chat/completions`);
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer sk-env");
   });
 
   it("throws when the reply carries no JSON object", async () => {
@@ -194,11 +194,16 @@ const CATALOG = new ModelCatalog(
 
 describe("AgentRuntime.systemOneProvider backend injection", () => {
   it("uses the injected backend instead of constructing an Ollama one", async () => {
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "inject" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "inject",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     const backend = new ScriptedBackend();
     const provider = runtime.systemOneProvider(CATALOG, { backend });
 
     await provider({
+      step: 0,
       messages: [{ role: "user", content: "deploy" }],
       tools: [],
     });

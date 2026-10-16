@@ -17,7 +17,11 @@ class ScriptedModel implements ChatModel {
 const NOOP_EXECUTOR = { execute: async () => ({ ok: true, output: {} }) } as never;
 
 const DECISION_MODEL = new ScriptedModel("gpt-4o-mini");
-const DEPLOY_TOOL: ToolSpec = { name: "deploy_service", description: "Deploy a service" };
+const DEPLOY_TOOL: ToolSpec = {
+  name: "deploy_service",
+  description: "Deploy a service",
+  inputSchema: {},
+};
 
 /**
  * The REPL is a coverage-excluded IO entry point, so this is the only place the
