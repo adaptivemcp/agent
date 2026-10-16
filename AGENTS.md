@@ -90,8 +90,9 @@ check formatting, so nothing will catch it for you.
 
 **Coverage gate.** `pnpm test:coverage` enforces ratcheted v8 thresholds
 (`vitest.config.ts`); CI runs it. Type-only modules and the CLI/REPL entry points
-are excluded (the latter are exercised via the integration tests); the gate
-covers the library core and adapters.
+are excluded — `src/cli.ts` runs `main()` at import time, so it is exercised by
+spawning it (`src/cli.e2e.test.ts`) and `src/repl.ts` has a unit test; what the
+gate measures is the library core and adapters, by import.
 
 **CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. The
 `@adaptivemcp/*` dependencies come from npm (they are published, not `link:`ed),
