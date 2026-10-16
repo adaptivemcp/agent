@@ -31,7 +31,7 @@ pnpm build         # tsc -> dist/
 pnpm typecheck     # tsc --noEmit
 pnpm test          # vitest (offline; scripted model + in-memory toolset)
 pnpm lint          # eslint
-pnpm format        # prettier --write
+pnpm format        # prettier --write (see the caveat below)
 pnpm demo          # offline vertical slice: loop -> telemetry -> derived view
 pnpm dev           # interactive REPL (streaming, multi-turn)
 pnpm dev -- --prompt "..." --server "fs=npx ..."   # one-shot
@@ -55,6 +55,13 @@ and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override bot
 
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
+
+**Formatting caveat.** `pnpm format` rewrites files you did not touch — the tree
+predates the current prettier's output for TS argument wrapping and for markdown
+(`*` bullets, `*emphasis*`), and **no prettier version in the declared range is
+clean** (#49). So run prettier on the files a change already touches, never as a
+blanket sweep: a blanket run buries the real change in cosmetic churn. CI does not
+check formatting, so nothing will catch it for you.
 
 **Coverage gate.** `pnpm test:coverage` enforces ratcheted v8 thresholds
 (`vitest.config.ts`); CI runs it. Type-only modules and the CLI/REPL entry points
