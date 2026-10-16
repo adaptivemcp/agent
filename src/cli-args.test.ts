@@ -183,8 +183,20 @@ describe("parseArgs coverage of the full flag surface", () => {
     expect(parseArgs(["first", "second"]).prompt).toBe("first");
   });
 
-  it("ignores unknown --flags", () => {
-    expect(parseArgs(["--unknown"]).prompt).toBeUndefined();
+  it("rejects an unknown --flag instead of silently ignoring it", () => {
+    expect(() => parseArgs(["--unknown"])).toThrow(/unknown option "--unknown"/);
+    // A common typo: the prompt is dropped and the REPL starts instead.
+    expect(() => parseArgs(["--promt", "hi"])).toThrow(/unknown option "--promt"/);
+  });
+
+  it("still accepts a bare word as the positional prompt", () => {
+    expect(parseArgs(["summarize the repo"]).prompt).toBe("summarize the repo");
+  });
+
+  it("sets version for --version / -V", () => {
+    expect(parseArgs(["--version"]).version).toBe(true);
+    expect(parseArgs(["-V"]).version).toBe(true);
+    expect(parseArgs([]).version).toBe(false);
   });
 
   it("throws when a value flag is missing its value", () => {
