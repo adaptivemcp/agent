@@ -166,6 +166,12 @@ export interface ToolExecutionResult {
   /** The approval decision, when the call went through the gate. */
   decision?: string;
   /**
+   * Whether the tool actually ran. `false` means the gate blocked the call —
+   * denied, or awaiting a confirmation nobody could answer — which is not the
+   * same as the tool failing, and is what a host reports as a distinct exit.
+   */
+  executed?: boolean;
+  /**
    * Set when the call did **not** run because the host paused the run to ask a
    * human (pause/resume). The loop then stops with `stopReason: "suspended"`
    * and leaves the call unresolved — no tool result is recorded — so resuming

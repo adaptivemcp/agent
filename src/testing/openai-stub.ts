@@ -16,6 +16,16 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 export interface StubRequest {
   model: string;
   messages: Array<{ role: string; content?: string | null; tool_call_id?: string }>;
+  /** The tools the model was offered on this request, as it sees them. */
+  tools?: Array<{ function?: { name?: string } }>;
+}
+
+/** The tool names offered on a request — how a test asserts what a child may use. */
+export function offeredTools(request: StubRequest): string[] {
+  return (request.tools ?? [])
+    .map((tool) => tool.function?.name ?? "")
+    .filter(Boolean)
+    .sort();
 }
 
 export type StubAnswer = { text: string } | { toolName: string; toolInput?: unknown };
@@ -67,6 +77,7 @@ export class StubModelServer {
     const request: StubRequest = {
       model: parsed.model ?? "stub",
       messages: parsed.messages ?? [],
+      tools: parsed.tools ?? [],
     };
     this.requests.push(request);
     const answer = this.options.respond?.(request) ?? this.defaultAnswer(request);
