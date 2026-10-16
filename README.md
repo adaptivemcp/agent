@@ -15,18 +15,20 @@ plus an agent loop.
 
 ## Quick start (offline)
 
-Requires **Node 22+** and **pnpm 11+**. The sibling `adaptive-mcp` packages must be
-built first (they are linked, not published):
+Requires **Node 22+** and **pnpm 11+**. The `@adaptivemcp/*` libraries are
+consumed from npm, so no sibling checkout is needed:
 
 ```bash
-# 1. build the libraries
-cd ../adaptive-mcp && pnpm install && pnpm -r run build
-
-# 2. this repo
-cd ../agent
 pnpm install
 pnpm demo          # vertical slice: loop -> telemetry -> evaluation -> derived view
 pnpm test          # offline: scripted model + in-memory toolset
+```
+
+To use the agent as a library or CLI in your own project:
+
+```bash
+npm install @adaptivemcp/agent        # library: import { AgentRuntime, runAgent } ...
+npx adaptivemcp-agent --help          # CLI entry point
 ```
 
 `pnpm test` stays offline (nothing leaves the machine): besides the scripted

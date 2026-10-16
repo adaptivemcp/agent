@@ -1,10 +1,12 @@
 {
   "name": "@adaptivemcp/agent",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
   "description": "The Adaptive MCP agent: an MCP-native agent host that closes the adaptation loop by owning both the LLM completion and the MCP execution.",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "packageManager": "pnpm@11.15.1",
   "engines": {
     "node": ">=22"
@@ -21,7 +23,9 @@
     "adaptivemcp-agent": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -36,18 +40,18 @@
     "demo": "tsx examples/vertical-slice.ts"
   },
   "dependencies": {
-    "@adaptivemcp/approval": "link:../adaptive-mcp/packages/approval",
-    "@adaptivemcp/evaluation": "link:../adaptive-mcp/packages/evaluation",
-    "@adaptivemcp/extension": "link:../adaptive-mcp/packages/extension",
-    "@adaptivemcp/graph-analysis": "link:../adaptive-mcp/packages/graph-analysis",
-    "@adaptivemcp/memory": "link:../adaptive-mcp/packages/memory",
-    "@adaptivemcp/middleware": "link:../adaptive-mcp/packages/middleware",
-    "@adaptivemcp/orchestration": "link:../adaptive-mcp/packages/orchestration",
-    "@adaptivemcp/routing": "link:../adaptive-mcp/packages/routing",
-    "@adaptivemcp/runtime": "link:../adaptive-mcp/packages/runtime",
-    "@adaptivemcp/spec": "link:../adaptive-mcp/packages/spec",
-    "@adaptivemcp/telemetry": "link:../adaptive-mcp/packages/telemetry",
-    "@adaptivemcp/thin-client": "link:../adaptive-mcp/packages/thin-client",
+    "@adaptivemcp/approval": "^0.2.4",
+    "@adaptivemcp/evaluation": "^0.4.0",
+    "@adaptivemcp/extension": "^0.5.0",
+    "@adaptivemcp/graph-analysis": "^0.2.1",
+    "@adaptivemcp/memory": "^0.4.0",
+    "@adaptivemcp/middleware": "^0.1.2",
+    "@adaptivemcp/orchestration": "^0.2.4",
+    "@adaptivemcp/routing": "^0.4.0",
+    "@adaptivemcp/runtime": "^0.4.0",
+    "@adaptivemcp/spec": "^0.4.0",
+    "@adaptivemcp/telemetry": "^0.1.7",
+    "@adaptivemcp/thin-client": "^0.4.0",
     "@ai-sdk/anthropic": "^4.0.65",
     "@ai-sdk/google": "^4.0.82",
     "@ai-sdk/openai": "^4.0.0",

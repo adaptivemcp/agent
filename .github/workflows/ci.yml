@@ -1,11 +1,8 @@
 name: CI
 
-# The agent is a consumer of the sibling `adaptive-mcp` repo (all
-# `@adaptivemcp/*` deps are `link:../adaptive-mcp/packages/*`), so CI checks out
-# both repos side by side and builds the libraries before the agent.
+# The agent consumes the published `@adaptivemcp/*` libraries from npm, so CI
+# installs from the registry and needs no sibling checkout.
 #
-# The adaptive-mcp checkout uses `secrets.ADAPTIVE_MCP_TOKEN` when set (needed
-# if that repo is private), falling back to the workflow token for public repos.
 # The optional `integration-qc` job drives the private `adaptivemcp/qc` repo; it
 # is gated on the `QC_E2E_ENABLED` repository variable and needs the
 # `QC_REPO_TOKEN` secret.
@@ -24,13 +21,6 @@ jobs:
         with:
           path: agent
 
-      - name: "Checkout adaptive-mcp (sibling link: dependency)"
-        uses: actions/checkout@v4
-        with:
-          repository: kemalelmizan/adaptive-mcp
-          path: adaptive-mcp
-          token: ${{ secrets.ADAPTIVE_MCP_TOKEN || github.token }}
-
       - uses: pnpm/action-setup@v4
         with:
           version: 11.15.1
@@ -39,17 +29,7 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
-          cache-dependency-path: |
-            agent/pnpm-lock.yaml
-            adaptive-mcp/pnpm-lock.yaml
-
-      - name: Install adaptive-mcp
-        working-directory: adaptive-mcp
-        run: pnpm install --frozen-lockfile
-
-      - name: Build adaptive-mcp libraries
-        working-directory: adaptive-mcp
-        run: pnpm -r --filter "./packages/*" run build
+          cache-dependency-path: agent/pnpm-lock.yaml
 
       - name: Install agent
         working-directory: agent
@@ -89,13 +69,6 @@ jobs:
         with:
           path: agent
 
-      - name: "Checkout adaptive-mcp (sibling link: dependency)"
-        uses: actions/checkout@v4
-        with:
-          repository: kemalelmizan/adaptive-mcp
-          path: adaptive-mcp
-          token: ${{ secrets.ADAPTIVE_MCP_TOKEN || github.token }}
-
       - name: "Checkout QC (real MCP server under test)"
         uses: actions/checkout@v4
         with:
@@ -111,21 +84,11 @@ jobs:
         with:
           node-version: 26
           cache: pnpm
-          cache-dependency-path: |
-            agent/pnpm-lock.yaml
-            adaptive-mcp/pnpm-lock.yaml
+          cache-dependency-path: agent/pnpm-lock.yaml
 
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-
-      - name: Install adaptive-mcp
-        working-directory: adaptive-mcp
-        run: pnpm install --frozen-lockfile
-
-      - name: Build adaptive-mcp libraries
-        working-directory: adaptive-mcp
-        run: pnpm -r --filter "./packages/*" run build
 
       - name: Install agent
         working-directory: agent

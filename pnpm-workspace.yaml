@@ -6,6 +6,20 @@ packages:
 allowBuilds:
   esbuild: true
 
+minimumReleaseAgeExclude:
+  - '@adaptivemcp/approval@0.2.4'
+  - '@adaptivemcp/evaluation@0.4.0'
+  - '@adaptivemcp/extension@0.5.0'
+  - '@adaptivemcp/graph-analysis@0.2.1'
+  - '@adaptivemcp/memory@0.4.0'
+  - '@adaptivemcp/middleware@0.1.2'
+  - '@adaptivemcp/orchestration@0.2.4'
+  - '@adaptivemcp/routing@0.4.0'
+  - '@adaptivemcp/runtime@0.4.0'
+  - '@adaptivemcp/spec@0.4.0'
+  - '@adaptivemcp/telemetry@0.1.7'
+  - '@adaptivemcp/thin-client@0.4.0'
+
 # Security parity with the adaptive-mcp repo: force patched transitive versions
 # pulled by the MCP SDK's HTTP transports. See ../adaptive-mcp/README.md.
 overrides:

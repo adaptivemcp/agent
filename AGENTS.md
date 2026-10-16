@@ -9,11 +9,12 @@ Adaptive MCP library; never reimplement the learning loop here.
 
 ## Relationship to `adaptive-mcp`
 
-- Libraries are consumed via `link:` to `../adaptive-mcp/packages/*`.
-- **Build the library first** after a clean checkout: from `../adaptive-mcp` run
-  `pnpm -r run build` (the linked packages resolve to their `dist/`).
+- Libraries are consumed from **npm** (`@adaptivemcp/*`, published at 0.4.x and
+  up). No sibling checkout or `link:` is needed to build or test this repo.
+- **Keep the pinned `@adaptivemcp/*` versions current** when a library changes:
+  publish it from `../adaptive-mcp`, then bump the ranges here.
 - Do not modify `../adaptive-mcp` from here. If a library needs a change, do it in
-  that repo, rebuild, and keep this repo a consumer.
+  that repo, publish, then bump the dependency here.
 - No first-class `adaptiveTool`/`adaptiveSkill`/`adaptiveIntent`/`adaptiveWorkflow`.
   MCP standardizes capabilities; Adaptive MCP learns behavior.
 

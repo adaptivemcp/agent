@@ -17,41 +17,41 @@ importers:
   .:
     dependencies:
       '@adaptivemcp/approval':
-        specifier: link:../adaptive-mcp/packages/approval
-        version: link:../adaptive-mcp/packages/approval
+        specifier: ^0.2.4
+        version: 0.2.4
       '@adaptivemcp/evaluation':
-        specifier: link:../adaptive-mcp/packages/evaluation
-        version: link:../adaptive-mcp/packages/evaluation
+        specifier: ^0.4.0
+        version: 0.4.0
       '@adaptivemcp/extension':
-        specifier: link:../adaptive-mcp/packages/extension
-        version: link:../adaptive-mcp/packages/extension
+        specifier: ^0.5.0
+        version: 0.5.0
       '@adaptivemcp/graph-analysis':
-        specifier: link:../adaptive-mcp/packages/graph-analysis
-        version: link:../adaptive-mcp/packages/graph-analysis
+        specifier: ^0.2.1
+        version: 0.2.1
       '@adaptivemcp/memory':
-        specifier: link:../adaptive-mcp/packages/memory
-        version: link:../adaptive-mcp/packages/memory
+        specifier: ^0.4.0
+        version: 0.4.0
       '@adaptivemcp/middleware':
-        specifier: link:../adaptive-mcp/packages/middleware
-        version: link:../adaptive-mcp/packages/middleware
+        specifier: ^0.1.2
+        version: 0.1.2
       '@adaptivemcp/orchestration':
-        specifier: link:../adaptive-mcp/packages/orchestration
-        version: link:../adaptive-mcp/packages/orchestration
+        specifier: ^0.2.4
+        version: 0.2.4
       '@adaptivemcp/routing':
-        specifier: link:../adaptive-mcp/packages/routing
-        version: link:../adaptive-mcp/packages/routing
+        specifier: ^0.4.0
+        version: 0.4.0
       '@adaptivemcp/runtime':
-        specifier: link:../adaptive-mcp/packages/runtime
-        version: link:../adaptive-mcp/packages/runtime
+        specifier: ^0.4.0
+        version: 0.4.0
       '@adaptivemcp/spec':
-        specifier: link:../adaptive-mcp/packages/spec
-        version: link:../adaptive-mcp/packages/spec
+        specifier: ^0.4.0
+        version: 0.4.0
       '@adaptivemcp/telemetry':
-        specifier: link:../adaptive-mcp/packages/telemetry
-        version: link:../adaptive-mcp/packages/telemetry
+        specifier: ^0.1.7
+        version: 0.1.7
       '@adaptivemcp/thin-client':
-        specifier: link:../adaptive-mcp/packages/thin-client
-        version: link:../adaptive-mcp/packages/thin-client
+        specifier: ^0.4.0
+        version: 0.4.0
       '@ai-sdk/anthropic':
         specifier: ^4.0.65
         version: 4.0.65(zod@4.6.5)
@@ -109,6 +109,42 @@ importers:
         version: 2.1.9(@types/node@22.20.4)(supports-color@7.2.0)
 
 packages:
+
+  '@adaptivemcp/approval@0.2.4':
+    resolution: {integrity: sha512-LiWpx0OEZEt594cLJSO5VK5V965Aj01BG92sl5STjmwh9IEUsQNTmhw5nHbdOAUitdyQuQapeXa5K6UcbktXbw==}
+
+  '@adaptivemcp/evaluation@0.4.0':
+    resolution: {integrity: sha512-VbO7WFUe9ww0WEeVkNpoXMMvpAgTDiswEvFVWq3Lnq1uqR5ya6FWUcigwDGSbWRyeBG2VYNiwze1tATRvDFr8w==}
+
+  '@adaptivemcp/extension@0.5.0':
+    resolution: {integrity: sha512-LBDAGDUA0duxh/nLKYyBCR4wxLyX23R+/mqRCF/BY8NIAF0l/oD3PPErLIJK33F9tUWYViFBOsj83Nk+YdjXdw==}
+
+  '@adaptivemcp/graph-analysis@0.2.1':
+    resolution: {integrity: sha512-xbr4T2xZDYBQjSCUJlUJnsvXosRnbQ4kx6qhsI+EEtD3XrLlkHkWgWgIrhVReE6uEZDsZmt2TLBUnXN5qvHHWQ==}
+
+  '@adaptivemcp/memory@0.4.0':
+    resolution: {integrity: sha512-dhDkxksqWIks3/pHu8Buh49Hoz8QlZPPHFy1ZZPowcwlWYTv92cqIu3JGUtFmVaX7bf+hvMM7FZsntR6G197mg==}
+
+  '@adaptivemcp/middleware@0.1.2':
+    resolution: {integrity: sha512-P67opCPXfqZACkej7oaYpTSCv88h5Zo2dcPOuxhP6XGUsbp+FeHcm7F6sZsRTet+YD8jsDxZgckKA0bx6gV7/w==}
+
+  '@adaptivemcp/orchestration@0.2.4':
+    resolution: {integrity: sha512-OYmmmfVPodsvp9qpfxobaRq5NFC7OYWB7Qz4rZmp5EFSd2JKsUq9y8AP8V0uNOBqgc0OeZGwRWTO0NSPx21w7w==}
+
+  '@adaptivemcp/routing@0.4.0':
+    resolution: {integrity: sha512-k67WSWv77+fvJfcEWAtH9bLywFE04nEH32LQIZzWjR1e4pFUaQaxjGkHI+S5bNsV7C58Gqxrki6XqoC+iro8tQ==}
+
+  '@adaptivemcp/runtime@0.4.0':
+    resolution: {integrity: sha512-3tNw37cUD2MuosewwMSCGOTbRW+uBpb4X9Eu7gUSN96d8zSvWGXKsn7G4NSd9HK97hl4A53D80IkpKBXF4KODA==}
+
+  '@adaptivemcp/spec@0.4.0':
+    resolution: {integrity: sha512-l2nByc5M6htYwR+OZaycNoOEWFJUTyk4gfG2AV6g4Dtt4k40sTv/5RdOIfuODa3xQ63hr9HB2eGHPyle/qFxXQ==}
+
+  '@adaptivemcp/telemetry@0.1.7':
+    resolution: {integrity: sha512-VYrbQwOECCWtJ/PXtdNymZSt4u6dkBn4Hjqxcq3Qodwn/Rt+OEH2yfHDJwh2iyd+u+EZmEVoOtCEOu1V6hsXDQ==}
+
+  '@adaptivemcp/thin-client@0.4.0':
+    resolution: {integrity: sha512-3aD/nnniitWQYJxfvZAvHP1CRZ+C/dCdL9nJOU3Fkl5Q1xo9NUl/Foc77tVPlYeFNbHoi81Bz/ObmPKwgyURUQ==}
 
   '@ai-sdk/anthropic@4.0.65':
     resolution: {integrity: sha512-3fmxxn5xWGOPU1wGrUCI30YFW5r6h2WrY+sz3rokkVlBHrDr889hPYP1yNoSmOVvtAwCFWlm79P2lRngIPOObg==}
@@ -1800,6 +1836,81 @@ packages:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
 snapshots:
+
+  '@adaptivemcp/approval@0.2.4':
+    dependencies:
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/evaluation@0.4.0':
+    dependencies:
+      '@adaptivemcp/approval': 0.2.4
+      '@adaptivemcp/extension': 0.5.0
+      '@adaptivemcp/graph-analysis': 0.2.1
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/orchestration': 0.2.4
+      '@adaptivemcp/routing': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+      '@adaptivemcp/telemetry': 0.1.7
+      '@adaptivemcp/thin-client': 0.4.0
+
+  '@adaptivemcp/extension@0.5.0':
+    dependencies:
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+      js-yaml: 4.3.2
+
+  '@adaptivemcp/graph-analysis@0.2.1':
+    dependencies:
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/memory@0.4.0':
+    dependencies:
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/middleware@0.1.2':
+    dependencies:
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/orchestration@0.2.4':
+    dependencies:
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/routing@0.4.0':
+    dependencies:
+      '@adaptivemcp/graph-analysis': 0.2.1
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/runtime@0.4.0':
+    dependencies:
+      '@adaptivemcp/approval': 0.2.4
+      '@adaptivemcp/evaluation': 0.4.0
+      '@adaptivemcp/extension': 0.5.0
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/middleware': 0.1.2
+      '@adaptivemcp/orchestration': 0.2.4
+      '@adaptivemcp/routing': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+      '@adaptivemcp/telemetry': 0.1.7
+
+  '@adaptivemcp/spec@0.4.0': {}
+
+  '@adaptivemcp/telemetry@0.1.7':
+    dependencies:
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
+
+  '@adaptivemcp/thin-client@0.4.0':
+    dependencies:
+      '@adaptivemcp/approval': 0.2.4
+      '@adaptivemcp/memory': 0.4.0
+      '@adaptivemcp/middleware': 0.1.2
+      '@adaptivemcp/orchestration': 0.2.4
+      '@adaptivemcp/routing': 0.4.0
+      '@adaptivemcp/spec': 0.4.0
 
   '@ai-sdk/anthropic@4.0.65(zod@4.6.5)':
     dependencies:
