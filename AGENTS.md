@@ -68,6 +68,13 @@ file — and those then shadow the `.ts` modules in vitest's module resolution. 
 tests suddenly fail with `exports is not defined`, look for emitted files under
 `src/` and delete them.
 
+**The CLI has an end-to-end test.** `src/cli.e2e.test.ts` spawns the real entry
+point against two local fixtures — `src/testing/openai-stub.ts` (an
+OpenAI-compatible endpoint) and `src/testing/mcp-server.ts` (a stdio MCP server) —
+so flags, catalog, MCP transport, loop, runtime and renderer are exercised
+together with no network. `tsconfig.json` excludes `src/testing/**`, so no fixture
+is ever built or published; the tests run them through `tsx`.
+
 **Formatting caveat.** `pnpm format` rewrites files you did not touch — the tree
 predates the current prettier's output for TS argument wrapping and for markdown
 (`*` bullets, `*emphasis*`), and **no prettier version in the declared range is

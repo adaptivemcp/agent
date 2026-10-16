@@ -159,6 +159,7 @@ async function main(): Promise<void> {
   // runtime, the run config — only exist inside the run below.
   let notifyParent: (message: string) => void = () => {};
   let drainNotifications: () => void = () => {};
+  let closeRuntime: () => void = () => {};
   let parentSpecs: ToolSpec[] = [];
   let runChild:
     | ((
@@ -287,6 +288,10 @@ async function main(): Promise<void> {
     // arrives as a steering message on the parent's next step — the parent is
     // never asked to poll.
     notifyParent = (message) => runtime.queueMessage(message);
+    // Deferred to the finally block: a background delegation may still be
+    // using the shared store, and closing the runtime first would pull the
+    // database out from under it ("database is not open").
+    closeRuntime = () => runtime.close();
     drainNotifications = () => {
       for (const message of runtime.drainQueuedMessages()) {
         console.log(`\n[delegated] ${message}`);
@@ -459,7 +464,6 @@ async function main(): Promise<void> {
         },
         decodingReport: () => runtime.decodingReport(),
       });
-      runtime.close();
       return;
     }
 
@@ -481,11 +485,13 @@ async function main(): Promise<void> {
       console.log(`\n[execution-graph]\n${runtime.graphView()}`);
       console.log(`\n[tools-metadata]\n${runtime.toolsMetadata()}`);
     }
-    runtime.close();
   } finally {
-    // `close()` waits for delegated children, so a result that arrived after the
-    // loop's last step is reported here instead of being dropped.
+    // Order matters. `tools.close()` waits for delegated children, which are
+    // still using the parent's store; the runtime closes that store, so it
+    // has to come after. Draining last reports a child that finished after
+    // the loop's final step instead of dropping it.
     await tools.close();
+    closeRuntime();
     drainNotifications();
     await headroom?.close();
   }
