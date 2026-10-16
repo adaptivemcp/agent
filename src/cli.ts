@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { AggregateToolset, sanitize, type ResourceToolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
 import { HttpToolset } from "./mcp/http.js";
@@ -42,6 +43,10 @@ async function main(): Promise<void> {
   }
   if (args.help) {
     printHelp();
+    return;
+  }
+  if (args.version) {
+    console.log(packageVersion());
     return;
   }
 
@@ -345,6 +350,18 @@ async function main(): Promise<void> {
   } finally {
     await tools.close();
     await headroom?.close();
+  }
+}
+
+/** The package version, read from `package.json` at runtime (never bundled). */
+function packageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      version?: string;
+    };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
   }
 }
 

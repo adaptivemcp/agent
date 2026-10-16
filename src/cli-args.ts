@@ -60,6 +60,8 @@ export interface CliArgs {
   context: boolean;
   verbose: boolean;
   help: boolean;
+  /** Print the version and exit. */
+  version: boolean;
 }
 
 /**
@@ -106,6 +108,7 @@ export function parseArgs(argv: string[]): CliArgs {
     system1: false,
     verbose: false,
     help: false,
+    version: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -215,9 +218,17 @@ export function parseArgs(argv: string[]): CliArgs {
       case "-h":
         args.help = true;
         break;
+      case "--version":
+      case "-V":
+        args.version = true;
+        break;
       default:
-        if (flag !== undefined && !flag.startsWith("--") && args.prompt === undefined)
-          args.prompt = flag;
+        // A bare word is the positional prompt shorthand; anything else that
+        // looks like an option is a typo — fail loudly rather than silently
+        // ignoring it (a dropped `--prompt` used to start the REPL instead).
+        if (flag === undefined) break;
+        if (flag.startsWith("-")) throw new Error(`unknown option "${flag}"`);
+        if (args.prompt === undefined) args.prompt = flag;
         break;
     }
   }
@@ -387,6 +398,7 @@ Options:
   --no-server-policy            Don't read/apply the server's tools-metadata policy
   --list-tools                  List discovered tools and exit
   -h, --help                    Show this help
+  -V, --version                 Print the version and exit
 `;
 
 export function printHelp(): void {
