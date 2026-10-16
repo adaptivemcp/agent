@@ -56,6 +56,18 @@ and the sibling `adaptive-mcp` example MCP server; `AI_*` flags/env override bot
 **Definition of done:** `pnpm build` + `pnpm typecheck` + `pnpm test` + `pnpm lint`
 all green.
 
+**Type-checking covers the tests.** `pnpm typecheck` runs two configs: the build
+config (`tsconfig.json`, which excludes `**/*.test.ts` so `pnpm build` never emits
+them) and `tsconfig.test.json`, which includes them. Until the second config
+existed, **30 type errors sat in the suite unnoticed** — vitest transpiles without
+checking, so only a runtime failure would ever have revealed them.
+
+**Trap when editing a tsconfig:** a malformed one makes `tsc -p` ignore it and
+compile the whole tree in place (no `outDir`), emitting `.js` beside every source
+file — and those then shadow the `.ts` modules in vitest's module resolution. If
+tests suddenly fail with `exports is not defined`, look for emitted files under
+`src/` and delete them.
+
 **Formatting caveat.** `pnpm format` rewrites files you did not touch — the tree
 predates the current prettier's output for TS argument wrapping and for markdown
 (`*` bullets, `*emphasis*`), and **no prettier version in the declared range is

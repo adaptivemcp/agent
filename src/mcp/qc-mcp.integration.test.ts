@@ -7,7 +7,7 @@ import type { ToolSpec } from "../types.js";
 import { AgentRuntime } from "../runtime.js";
 import type { ServerToolsMetadata } from "../runtime.js";
 import { StdioToolset } from "../mcp/stdio.js";
-import { parseServer } from "../config.js";
+import { isHttpServerSpec, parseServer } from "../config.js";
 
 /**
  * End-to-end against a *real* third-party MCP server (QueryCleaner/QC), spoken
@@ -33,12 +33,11 @@ describe.skipIf(!enabled || !hasQc)("qc mcp (real stdio server)", () => {
   let specs: ToolSpec[] = [];
 
   beforeAll(async () => {
-    toolset = new StdioToolset(
-      "qc",
-      parseServer(
-        JSON.stringify({ name: "qc", command: qcBin, args: ["mcp"], cwd: qcRepo }),
-      ),
+    const spec = parseServer(
+      JSON.stringify({ name: "qc", command: qcBin, args: ["mcp"], cwd: qcRepo }),
     );
+    if (isHttpServerSpec(spec)) throw new Error("expected a stdio server spec");
+    toolset = new StdioToolset("qc", spec);
     specs = await toolset.listTools();
     runtime = new AgentRuntime({
       dbPath: ":memory:",
@@ -74,18 +73,15 @@ describe.skipIf(!enabled || !hasQc)("qc mcp (real stdio server)", () => {
     // error code for the client to inspect.
     const raw = await toolset.callTool("profile_dataset", args);
     expect(raw.ok).toBe(false);
-    const payload = (
-      typeof raw.output === "string" ? JSON.parse(raw.output) : raw.output
-    ) as { status?: string };
+    const payload = (typeof raw.output === "string" ? JSON.parse(raw.output) : raw.output) as {
+      status?: string;
+    };
     expect(payload.status).toBe("error");
 
     // Through AgentRuntime, that failure must be recorded as a failure — and
     // servers that report it *only* in-band (success + status:"error") are
     // caught by the envelope classifier for the same reason.
-    const result = await runtime.execute(
-      { id: "c1", name: "profile_dataset", input: args },
-      spec!,
-    );
+    const result = await runtime.execute({ id: "c1", name: "profile_dataset", input: args }, spec!);
     expect(result.ok).toBe(false);
     expect(runtime.adaptive.memory.getTool("profile_dataset", "qc")?.stats.failureRate).toBe(1);
   });

@@ -9,7 +9,9 @@ function planned(output: unknown) {
 }
 
 /** A caller that returns a scripted sequence of outputs. */
-function scripted(outputs: unknown[]): JobCaller & { calls: Array<{ name: string; input: unknown }> } {
+function scripted(
+  outputs: unknown[],
+): JobCaller & { calls: Array<{ name: string; input: unknown }> } {
   const calls: Array<{ name: string; input: unknown }> = [];
   let index = 0;
   return {
@@ -25,7 +27,10 @@ function scripted(outputs: unknown[]): JobCaller & { calls: Array<{ name: string
 
 describe("parseJobHandle", () => {
   it("reads a job id and status from an object or JSON text", () => {
-    expect(parseJobHandle({ job_id: "j1", status: "running" })).toEqual({ id: "j1", status: "running" });
+    expect(parseJobHandle({ job_id: "j1", status: "running" })).toEqual({
+      id: "j1",
+      status: "running",
+    });
     expect(parseJobHandle('{"job_id":"j2","status":"completed"}')).toEqual({
       id: "j2",
       status: "completed",
@@ -47,7 +52,7 @@ describe("jobPollingMiddleware", () => {
       { job_id: "j1", status: "completed", data: { rows: 10 } },
     ]);
     const mw = jobPollingMiddleware(caller, { sleep: async () => {}, now: () => 0 });
-    const result = { ok: true };
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned({ job_id: "j1", status: "running" });
 
     await mw.afterCall!(result, call, ctx);
@@ -62,7 +67,7 @@ describe("jobPollingMiddleware", () => {
   it("marks a terminally failed job as a failure", async () => {
     const caller = scripted([{ job_id: "j1", status: "failed" }]);
     const mw = jobPollingMiddleware(caller, { sleep: async () => {}, now: () => 0 });
-    const result = { ok: true };
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned({ job_id: "j1", status: "pending" });
 
     await mw.afterCall!(result, call, ctx);
@@ -74,7 +79,7 @@ describe("jobPollingMiddleware", () => {
   it("does nothing when the output is not a running job", async () => {
     const caller = scripted([{ job_id: "j1", status: "completed" }]);
     const mw = jobPollingMiddleware(caller, { sleep: async () => {} });
-    const result = { ok: true };
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned({ result: "done" });
 
     await mw.afterCall!(result, call, ctx);
@@ -90,7 +95,7 @@ describe("jobPollingMiddleware", () => {
       now: () => 0,
       statusToolFor: () => "qc_get_job_status",
     });
-    const result = { ok: true };
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned('{"job_id":"j9","status":"running"}');
 
     await mw.afterCall!(result, call, ctx);
@@ -109,7 +114,7 @@ describe("jobPollingMiddleware", () => {
       pollIntervalMs: 50,
       maxWaitMs: 100,
     });
-    const result = { ok: true };
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned({ job_id: "j1", status: "running" });
 
     await mw.afterCall!(result, call, ctx);
@@ -121,8 +126,11 @@ describe("jobPollingMiddleware", () => {
 
   it("skips polling when no status tool is available for the server", async () => {
     const caller = scripted([{ job_id: "j1", status: "completed" }]);
-    const mw = jobPollingMiddleware(caller, { sleep: async () => {}, statusToolFor: () => undefined });
-    const result = { ok: true };
+    const mw = jobPollingMiddleware(caller, {
+      sleep: async () => {},
+      statusToolFor: () => undefined,
+    });
+    const result: { ok: boolean; error?: string; output?: unknown } = { ok: true };
     const call = planned({ job_id: "j1", status: "running" });
 
     await mw.afterCall!(result, call, ctx);

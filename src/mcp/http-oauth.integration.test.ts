@@ -100,7 +100,10 @@ describe("HTTP + OAuth end-to-end", () => {
       const toolset = new HttpToolset("http", { serverName: "http", url });
 
       const runOnce = async (): Promise<{ ok: boolean; error?: string; output?: unknown }> => {
-        let outcome = { ok: false as boolean, error: "not run" as string | undefined };
+        let outcome: { ok: boolean; error?: string; output?: unknown } = {
+          ok: false,
+          error: "not run",
+        };
         const res = await client.run(
           "echo",
           async (input, context) => toolset.callTool("echo", input, context),

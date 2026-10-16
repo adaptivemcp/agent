@@ -429,13 +429,18 @@ describe("tier list end-to-end: parsed CLI args → provider → failover", () =
     const selection = resolveSystem1(parsed, env, fetchImpl);
     expect(selection.backends).toHaveLength(2);
 
-    const runtime = new AgentRuntime({ dbPath: ":memory:", sessionId: "cli-tier-list" });
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "cli-tier-list",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
     // Mirrors cli.ts: the parsed selection is spread into the provider options.
     const provider = runtime.systemOneProvider(CATALOG, {
       model: parsed.system1Model,
       ...selection,
     });
     const applied = await provider({
+      step: 0,
       messages: [{ role: "user", content: "deploy" }],
       tools: [],
     });
@@ -473,10 +478,10 @@ describe("openai tier end-to-end (injected fetch)", () => {
 
     // Wire shape: OpenAI-compatible chat completions + bearer auth.
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://gw.example/v1/chat/completions");
-    const headers = calls[0].init.headers as Record<string, string>;
+    expect(calls[0]!.url).toBe("https://gw.example/v1/chat/completions");
+    const headers = calls[0]!.init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer sk-test");
-    const body = JSON.parse(String(calls[0].init.body)) as {
+    const body = JSON.parse(String(calls[0]!.init.body)) as {
       model: string;
       messages: Array<{ role: string; content: string }>;
     };
