@@ -298,6 +298,12 @@ async function main(): Promise<void> {
       system1: system1Enabled ? system1Selection : undefined,
     });
 
+    // `--yes` is the only way to auto-approve in a non-interactive run; without
+    // it a `require_confirmation` tool is denied (fail closed — see
+    // AgentRuntime's default approver). The REPL prompts instead, and only skips
+    // the prompt when --yes is set.
+    if (args.autoApprove) runtime.setRequestApproval(() => true);
+
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       await runRepl({

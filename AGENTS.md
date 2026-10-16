@@ -141,6 +141,9 @@ ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
 - `applyServerMetadata(doc, {server})` / `serverPolicySummary()` — read and apply
   the server's `dev.adaptivemcp/tools-metadata` policy as a floor.
 - `setRequestApproval(fn)` / `approvalReason(tool)` — human-in-the-loop approvals.
+  **With no approver set, a `require_confirmation` tool is denied** (fail closed);
+  auto-approval is an explicit opt-in (the CLI's `--yes`). A permissive default
+  here once ran exactly the tools a policy had flagged for a human.
 - `learnedContext()` / `costSummary()` / `graphView()` — feedback for the REPL.
 - `decodingReport()` — per-group applied-decoding telemetry (`DecodingAnalyzer`).
 - `metricDriftReport()` — recent-vs-lifetime drift per tool (`computeMetricDrift`).

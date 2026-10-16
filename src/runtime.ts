@@ -95,6 +95,12 @@ export interface AgentRuntimeOptions {
   /** Where to write the derived `tools-metadata.yaml` view. */
   yamlPath?: string;
   approvalPolicy?: ApprovalPolicy;
+  /**
+   * Approve a `require_confirmation` tool. **When omitted, confirmations are
+   * denied** (fail closed): a host opts in to auto-approval explicitly (the CLI
+   * does so via `--yes`). Defaulting to approve silently ran tools a policy had
+   * flagged for a human.
+   */
   requestApproval?: (toolName: string) => boolean | Promise<boolean>;
   middleware?: Middleware[];
   sessionId?: string;
@@ -198,6 +204,8 @@ export class AgentRuntime implements AgentExecutor {
   private readonly resolver = new DecodingResolver();
   private readonly invoke: ToolInvoker;
   private approver: (toolName: string) => boolean | Promise<boolean>;
+  /** Whether a host set an approver, so a denial can say why it happened. */
+  private approverConfigured: boolean;
   private readonly onExecuted?: (observation: ExecutionObservation) => void;
   private readonly warnedSignals = new Set<string>();
   private readonly serverBudgets = new Map<string, number>();
@@ -208,7 +216,8 @@ export class AgentRuntime implements AgentExecutor {
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
-    this.approver = options.requestApproval ?? (() => true);
+    this.approver = options.requestApproval ?? (() => false);
+    this.approverConfigured = options.requestApproval !== undefined;
     this.onExecuted = options.onExecuted;
     this.adaptive = new AdaptiveRuntime({
       dbPath: options.dbPath,
@@ -239,6 +248,7 @@ export class AgentRuntime implements AgentExecutor {
   /** Replace the approval prompt (e.g. wire it to the REPL's y/n prompt). */
   setRequestApproval(requestApproval: (toolName: string) => boolean | Promise<boolean>): void {
     this.approver = requestApproval;
+    this.approverConfigured = true;
   }
 
   /** Execute one tool call through approval → middleware → retry → telemetry → view. */
@@ -269,7 +279,17 @@ export class AgentRuntime implements AgentExecutor {
     );
 
     if (!outcome.executed) {
-      return { ok: false, error: `blocked (${outcome.decision})`, decision: outcome.decision };
+      // Say *why* when the denial came from nobody being asked: otherwise
+      // "blocked (require_confirmation)" reads as the user having declined.
+      const reason =
+        outcome.decision === "require_confirmation" && !this.approverConfigured
+          ? " — no approver is configured, so it is denied; confirm interactively or opt in to auto-approval"
+          : "";
+      return {
+        ok: false,
+        error: `blocked (${outcome.decision})${reason}`,
+        decision: outcome.decision,
+      };
     }
 
     const durationMs = Date.now() - startedAt;
