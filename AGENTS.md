@@ -187,3 +187,7 @@ ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
 - A step's tool calls share one `agent_turn_<n>` execution-graph root
   (`AgentRuntime.runTurn`); deeper per-turn action nesting is future work.
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.
+- `docs/archetypes/` catalogues the components behind the five agent archetypes
+  (tool, skills, sequential, human-in-the-loop, orchestrator) and where this host
+  stands against them — the reference for prioritising new capability. Its gap
+  backlog is the `Agent archetypes` milestone.

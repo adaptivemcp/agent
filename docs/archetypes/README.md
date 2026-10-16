@@ -87,5 +87,5 @@ Kept neutral here: each is a _missing component_, not a commitment.
 ## A note on authenticity
 
 Every claim in these files is grounded in a file in a reference clone (paths are
-cited) or in `agent/src` (paths cited). The contract sketches are _sketches_ —
+cited) or in `src` (paths cited). The contract sketches are _sketches_ —
 shape, not API — and are marked as such so nobody mistakes them for a decision.
