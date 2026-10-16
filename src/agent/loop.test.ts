@@ -5,7 +5,7 @@ import { AggregateToolset, InMemoryToolset } from "../mcp/toolset.js";
 import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
-import { runAgent } from "./loop.js";
+import { runAgent, unresolvedToolCalls } from "./loop.js";
 import type {
   AgentEvent,
   AgentExecutor,
@@ -955,5 +955,121 @@ describe("agent loop", () => {
 
     expect(result.ok).toBe(true);
     runtime.close();
+  });
+
+  describe("pause / resume", () => {
+    const specs: ToolSpec[] = [
+      { name: "deploy_service", inputSchema: {} },
+      { name: "search_customer", inputSchema: {} },
+    ];
+
+    it("stops with 'suspended' and leaves the paused call unresolved", async () => {
+      const events: AgentEvent[] = [];
+      // A host that pauses instead of running the call: `execute` answers with a
+      // suspension, which is the whole contract the loop needs.
+      const executor: AgentExecutor = {
+        execute: async () => ({
+          ok: false,
+          decision: "require_confirmation",
+          error: "paused for approval: sus-1",
+          suspension: { id: "sus-1", question: "approve deploy_service?" },
+        }),
+      };
+      const model = new ScriptedModel([{ toolCalls: [{ name: "deploy_service", input: {} }] }]);
+
+      const result = await runAgent({
+        model,
+        tools: specs,
+        executor,
+        messages: [{ role: "user", content: "go" }],
+        onEvent: (event) => events.push(event),
+      });
+
+      expect(result.stopReason).toBe("suspended");
+      expect(
+        events.some((event) => event.type === "suspended" && event.suspensionId === "sus-1"),
+      ).toBe(true);
+      // No tool result: the call never ran, so a resume has to re-execute it and
+      // the model must not be told a failure happened.
+      expect(result.messages.some((message) => message.role === "tool")).toBe(false);
+      expect(unresolvedToolCalls(result.messages)).toHaveLength(1);
+    });
+
+    it("re-runs the unresolved call of a resumed run, then continues", async () => {
+      const seen: string[] = [];
+      const executor: AgentExecutor = {
+        execute: async (call) => {
+          seen.push(call.name);
+          return { ok: true, output: { deployed: true } };
+        },
+      };
+      // What a pause leaves behind: the assistant asked for the call, no result
+      // was recorded.
+      const paused: ChatMessage[] = [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call-1", name: "deploy_service", input: {} }],
+        },
+      ];
+      const model = new ScriptedModel([{ text: "done" }]);
+
+      const result = await runAgent({ model, tools: specs, executor, messages: paused });
+
+      expect(seen).toEqual(["deploy_service"]);
+      expect(
+        result.messages.some(
+          (message) => message.role === "tool" && message.toolCallId === "call-1",
+        ),
+      ).toBe(true);
+      expect(result.stopReason).toBe("completed");
+      expect(result.messages.at(-1)?.content).toBe("done");
+    });
+
+    it("re-runs only the unanswered calls of a partially-executed turn", async () => {
+      // A batch that paused mid-way: the first call ran, the second did not.
+      const seen: string[] = [];
+      const executor: AgentExecutor = {
+        execute: async (call) => {
+          seen.push(call.name);
+          return { ok: true, output: call.name };
+        },
+      };
+      const messages: ChatMessage[] = [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "c1", name: "search_customer", input: {} },
+            { id: "c2", name: "deploy_service", input: {} },
+          ],
+        },
+        { role: "tool", content: "ok", toolCallId: "c1", name: "search_customer" },
+      ];
+      const model = new ScriptedModel([{ text: "done" }]);
+
+      const result = await runAgent({ model, tools: specs, executor, messages });
+
+      // The already-run call is not repeated — a resume must not repeat side
+      // effects the first attempt already performed.
+      expect(seen).toEqual(["deploy_service"]);
+      expect(unresolvedToolCalls(result.messages)).toEqual([]);
+    });
+
+    it("sees no unresolved calls in a finished conversation", () => {
+      expect(unresolvedToolCalls([{ role: "user", content: "hi" }])).toEqual([]);
+      expect(
+        unresolvedToolCalls([
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ id: "c1", name: "search_customer", input: {} }],
+          },
+          { role: "tool", content: "x", toolCallId: "c1", name: "search_customer" },
+        ]),
+      ).toEqual([]);
+    });
   });
 });
