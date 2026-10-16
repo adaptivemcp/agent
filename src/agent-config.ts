@@ -23,6 +23,7 @@ const NUMBER_KEYS = ["maxSteps", "routerMinInvocations"] as const;
 const BOOLEAN_KEYS = [
   "system1",
   "awaitJobs",
+  "task",
   "noOllama",
   "noStream",
   "autoApprove",

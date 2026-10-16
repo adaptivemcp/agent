@@ -87,6 +87,15 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   for it, so a large skill library costs almost nothing until it is used. A
   malformed `SKILL.md` is reported and skipped rather than failing the run, and
   the read tool cannot leave a skill's own directory.
+- **Delegation.** `--task` exposes a `task` tool: the model can hand a
+  self-contained job to a **sub-agent** that runs in its own session and returns
+  only its result — so a broad search or a long review cannot flood the caller's
+  context. The child shares the parent's memory (its calls land in the same graph,
+  under its own session) but **inherits no authority**: it never auto-approves,
+  even under `--yes`, and it does not receive the `task` tool itself, so
+  delegation cannot recurse. `background: true` returns immediately and reports
+  once on completion — the parent is told not to poll, and the result arrives as a
+  steering message on its next step.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool

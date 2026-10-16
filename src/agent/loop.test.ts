@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
 import type { Middleware } from "@adaptivemcp/middleware";
 import { AggregateToolset, InMemoryToolset } from "../mcp/toolset.js";
+import { delegatableTools, taskToolset } from "../delegation.js";
 import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
@@ -1070,6 +1071,127 @@ describe("agent loop", () => {
           { role: "tool", content: "x", toolCallId: "c1", name: "search_customer" },
         ]),
       ).toEqual([]);
+    });
+  });
+
+  describe("delegation plumbing", () => {
+    it("delivers a queued message on the next review, and once", async () => {
+      const runtime = await runtimeFor(toolset(), "s24");
+
+      runtime.queueMessage("Background task finished: audit");
+      expect(runtime.review()).toBe("Background task finished: audit");
+      // Delivered once: a steering message must not repeat every step.
+      expect(runtime.review()).toBeUndefined();
+
+      runtime.close();
+    });
+
+    it("hands back messages queued after the run's last step", async () => {
+      const runtime = await runtimeFor(toolset(), "s25");
+      runtime.queueMessage("late result");
+
+      expect(runtime.drainQueuedMessages()).toEqual(["late result"]);
+      expect(runtime.drainQueuedMessages()).toEqual([]);
+
+      runtime.close();
+    });
+
+    it("lets a child share the parent's memory without owning it", async () => {
+      const tools = toolset();
+      const parent = await runtimeFor(tools, "s26");
+      const child = new AgentRuntime({
+        // The child's session differs; its memory does not.
+        store: parent.adaptive.memory,
+        sessionId: "s26/task-1",
+        requestApproval: () => false, // derived permissions: a child never auto-approves
+        invoke: (name, input) => tools.callTool(name, input),
+      });
+      const spec: ToolSpec = { name: "search_customer", inputSchema: {} };
+
+      await child.execute({ id: "c1", name: "search_customer", input: {} }, spec);
+
+      // The child's call is recorded in the shared store, under the child's own
+      // session — so a delegated run lands in the same graph and learned state.
+      expect(parent.adaptive.memory.getTool("search_customer")?.stats.invocations).toBe(1);
+      expect(
+        parent.adaptive.memory.getNodesBySession?.("s26/task-1")?.map((node) => node.status),
+      ).toEqual(["completed"]);
+
+      // A runtime handed a store does not own it: closing the child must leave
+      // the parent's memory open (`AdaptiveRuntime.close()` closes it always).
+      child.close();
+      expect(parent.adaptive.memory.allTools()).toHaveLength(1);
+      parent.close();
+    });
+
+    it("carries out a delegation end-to-end: the parent gets a result, not a transcript", async () => {
+      const servers = toolset();
+      const parent = new AgentRuntime({
+        dbPath: ":memory:",
+        sessionId: "s27",
+        requestApproval: () => true,
+        invoke: (name, input) => aggregate.callTool(name, input),
+      });
+      // The child's loop is a real one: its own runtime, session and tools.
+      const delegation = taskToolset({
+        session: "s27",
+        run: async (task, sessionId) => {
+          const child = new AgentRuntime({
+            store: parent.adaptive.memory,
+            sessionId,
+            requestApproval: () => false,
+            invoke: (name, input) => aggregate.callTool(name, input),
+          });
+          const run = await runAgent({
+            model: new ScriptedModel([
+              { toolCalls: [{ name: "search_customer", input: { id: 7 } }] },
+              { text: "found the customer" },
+            ]),
+            tools: delegatableTools(await aggregate.listTools(), "delegate_task"),
+            executor: child,
+            messages: [
+              { role: "system", content: "You are a sub-agent." },
+              { role: "user", content: task.prompt },
+            ],
+          });
+          child.close();
+          return {
+            status: "completed" as const,
+            summary: run.messages.at(-1)?.content ?? "",
+            steps: run.steps,
+            sessionId,
+          };
+        },
+      });
+      // Exactly how the CLI assembles it: MCP tools and the delegation tool in one
+      // aggregate, so `delegate_task` takes the normal execution path.
+      const aggregate = new AggregateToolset([servers, delegation]);
+      const specs = await aggregate.listTools();
+      const model = new ScriptedModel([
+        {
+          toolCalls: [
+            { name: "delegate_task", input: { description: "find", prompt: "find customer 7" } },
+          ],
+        },
+        { text: "the delegate found them" },
+      ]);
+
+      const result = await runAgent({
+        model,
+        tools: specs,
+        executor: parent,
+        messages: [{ role: "user", content: "go" }],
+      });
+
+      const toolMessages = result.messages.filter((message) => message.role === "tool");
+      expect(toolMessages).toHaveLength(1);
+      expect(toolMessages[0]?.content).toContain("found the customer");
+      // The child's transcript stays behind: its tool call never enters the parent.
+      expect(result.messages.some((message) => message.name === "search_customer")).toBe(false);
+      // And the child's own call is recorded, under its own session.
+      expect(parent.adaptive.memory.getNodesBySession?.("s27/task-1")).toHaveLength(1);
+      parent.close();
+      await servers.close();
     });
   });
 });

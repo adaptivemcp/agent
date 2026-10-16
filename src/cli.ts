@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AggregateToolset, sanitize, type ResourceToolset } from "./mcp/toolset.js";
+import { AggregateToolset, sanitize, type ResourceToolset, type Toolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
 import { HttpToolset } from "./mcp/http.js";
 import {
@@ -31,9 +31,17 @@ import {
 } from "./cli-args.js";
 import { loadAgentConfig } from "./agent-config.js";
 import { jobPollingMiddleware } from "./jobs.js";
+import {
+  TASK_TOOL,
+  delegatableTools,
+  subagentApproval,
+  taskToolset,
+  type SubagentResult,
+  type SubagentTask,
+} from "./delegation.js";
 import { discoverSkills, skillsPrompt, skillsToolset } from "./skills.js";
 import { renderOneShot, stringify } from "./render.js";
-import type { ChatModel } from "./types.js";
+import type { ChatMessage, ChatModel } from "./types.js";
 
 async function main(): Promise<void> {
   let args: CliArgs;
@@ -139,9 +147,28 @@ async function main(): Promise<void> {
   const skills = discoverSkills(skillDirs(args), (message) => {
     if (args.verbose) console.warn(`[skills] ${message}`);
   });
-  const tools = new AggregateToolset(
-    skills.length > 0 ? [...toolsets, skillsToolset(skills)] : toolsets,
-  );
+  const sessionId = args.session ?? `cli-${Date.now()}`;
+  // Delegation is wired lazily: the toolset joins the aggregate now (so `task` is
+  // in the tool list the model sees), while its dependencies — the parent
+  // runtime, the run config — only exist inside the run below.
+  let notifyParent: (message: string) => void = () => {};
+  let drainNotifications: () => void = () => {};
+  let runChild: ((task: SubagentTask, childSession: string) => Promise<SubagentResult>) | undefined;
+  const toolsetList: Toolset[] = [...toolsets];
+  if (skills.length > 0) toolsetList.push(skillsToolset(skills));
+  if (args.task) {
+    toolsetList.push(
+      taskToolset({
+        session: sessionId,
+        run: (task, childSession) => {
+          if (!runChild) return Promise.reject(new Error("delegation is not wired yet"));
+          return runChild(task, childSession);
+        },
+        notify: (message) => notifyParent(message),
+      }),
+    );
+  }
+  const tools = new AggregateToolset(toolsetList);
   if (args.verbose && skills.length > 0) {
     console.log(
       `[skills] ${skills.length} loaded: ${skills.map((skill) => skill.name).join(", ")}`,
@@ -184,7 +211,6 @@ async function main(): Promise<void> {
       return;
     }
 
-    const sessionId = args.session ?? `cli-${Date.now()}`;
     const reportToolByServer = new Map<string, string>();
     for (const spec of specs) {
       if (spec.name.endsWith("report_observation")) {
@@ -237,6 +263,16 @@ async function main(): Promise<void> {
           }
         : undefined,
     });
+    // A background child announces its result through the runtime's queue, so it
+    // arrives as a steering message on the parent's next step — the parent is
+    // never asked to poll.
+    notifyParent = (message) => runtime.queueMessage(message);
+    drainNotifications = () => {
+      for (const message of runtime.drainQueuedMessages()) {
+        console.log(`\n[delegated] ${message}`);
+      }
+    };
+
     // Seed risk from standard MCP annotations (falling back to a local default
     // for servers that ship none) so approvals can act before learning.
     runtime.seedToolAnnotations(specs, {
@@ -324,6 +360,51 @@ async function main(): Promise<void> {
     // the prompt when --yes is set.
     if (args.autoApprove) runtime.setRequestApproval(() => true);
 
+    // The child runner. A child is a full sub-agent: own session, own
+    // conversation, and only its final answer goes back. It shares the parent's
+    // store, so its calls land in the same graph and learned state.
+    if (args.task) {
+      const taskToolName = `${sanitize("delegate")}_${sanitize(TASK_TOOL)}`;
+      const childTools = delegatableTools(specs, taskToolName);
+      runChild = async (task: SubagentTask, childSession: string): Promise<SubagentResult> => {
+        const child = new AgentRuntime({
+          store: runtime.adaptive.memory,
+          sessionId: childSession,
+          workflowId: args.workflow,
+          // Derived permissions (delegation must not amplify authority): a child
+          // never auto-approves, even when the parent runs with --yes.
+          requestApproval: subagentApproval(),
+          invoke: (name, input, _serverName, context) => tools.callTool(name, input, context),
+          middleware,
+          routerModels: catalog.routingOptions(),
+          routerMinInvocations: args.routerMinInvocations,
+        });
+        try {
+          const result = await runAgent({
+            ...runConfig,
+            executor: child,
+            tools: childTools,
+            maxSteps: TASK_MAX_STEPS,
+            messages: [
+              { role: "system", content: subagentSystem(systemWithServers) },
+              { role: "user", content: task.prompt },
+            ],
+            onEvent: args.verbose ? (event) => renderOneShot(event, true) : undefined,
+          });
+          const summary = finalAssistantText(result.messages);
+          return {
+            status: result.stopReason === "completed" ? "completed" : "failed",
+            summary:
+              summary || `the sub-agent stopped with ${result.stopReason} and produced no answer`,
+            steps: result.steps,
+            sessionId: childSession,
+          };
+        } finally {
+          child.close();
+        }
+      };
+    }
+
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       await runRepl({
@@ -378,7 +459,10 @@ async function main(): Promise<void> {
     }
     runtime.close();
   } finally {
+    // `close()` waits for delegated children, so a result that arrived after the
+    // loop's last step is reported here instead of being dropped.
     await tools.close();
+    drainNotifications();
     await headroom?.close();
   }
 }
@@ -393,6 +477,29 @@ function skillDirs(args: CliArgs): string[] {
   const convention = join(process.cwd(), "skills");
   if (!dirs.includes(convention) && existsSync(convention)) dirs.push(convention);
   return dirs;
+}
+
+/** Child step cap: a sub-agent is for one bounded piece of work, not a second run. */
+const TASK_MAX_STEPS = 6;
+
+/** The child's system prompt: the parent's environment, framed as a delegate. */
+function subagentSystem(environment: string): string {
+  return [
+    "You are a sub-agent. Another agent delegated exactly one task to you, and you cannot see its conversation.",
+    "Use the tools you have, then reply with your result: what you found or did, and everything the caller needs to know.",
+    "Your reply is the only thing the caller receives, so make it self-contained and concrete.",
+    "",
+    environment,
+  ].join("\n");
+}
+
+/** The last assistant text — what a delegated child hands back to its caller. */
+function finalAssistantText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === "assistant" && message.content.trim()) return message.content;
+  }
+  return "";
 }
 
 /** The package version, read from `package.json` at runtime (never bundled). */
