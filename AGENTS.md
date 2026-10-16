@@ -51,13 +51,12 @@ all green.
 are excluded (the latter are exercised via the integration tests); the gate
 covers the library core and adapters.
 
-**CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. Because every
-`@adaptivemcp/*` dependency is a `link:` into the sibling repo, CI checks out
-`adaptive-mcp` next to `agent/` (via `secrets.ADAPTIVE_MCP_TOKEN` when set,
-falling back to the workflow token for a public repo) and builds its packages
-before installing the agent. CI runs **Node 26** (the documented recommendation),
-where `node:sqlite` is available without a flag; the optional `integration-qc`
-job is gated on the `QC_E2E_ENABLED` variable + `QC_REPO_TOKEN` secret.
+**CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. The
+`@adaptivemcp/*` dependencies come from npm (they are published, not `link:`ed),
+so CI installs from the registry and needs no sibling checkout. CI runs **Node
+26** (the documented recommendation), where `node:sqlite` is available without a
+flag; the optional `integration-qc` job is gated on the `QC_E2E_ENABLED`
+variable (the QC repo is public, so no token is needed).
 
 ## Architecture (seams)
 
