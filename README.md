@@ -58,12 +58,12 @@ pnpm dev
 
 Defaults (each overridable by a flag or an `AI_*` env var):
 
-| Setting        | Default                                                                 |
-| -------------- | ----------------------------------------------------------------------- |
-| Model endpoint | `http://127.0.0.1:9931/v1` (a local `llama-server`)                     |
-| API key        | `$AI_API_KEY`, else `$LLAMA_API_KEY`                                    |
-| Model id       | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field) |
-| MCP server     | the sibling `adaptive-mcp` example server (`examples/dist/server.js`)   |
+| Setting        | Default                                                                               |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Model endpoint | `http://127.0.0.1:9931/v1` (a local `llama-server`)                                   |
+| API key        | `$AI_API_KEY`, else `$LLAMA_API_KEY`                                                  |
+| Model id       | `Qwen/Qwen3-8B` (any OpenAI-compatible id; llama.cpp ignores the field)               |
+| MCP server     | the sibling `adaptive-mcp` example server (`../adaptive-mcp/examples/dist/server.js`) |
 
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
@@ -390,6 +390,8 @@ TelemetryRecorder → MemoryStore → Evaluator / GraphAnalyzer → ExtensionCon
   `AdaptiveRuntime` + `ThinClient` + `GraphTrackingMiddleware`.
 
 See [`docs/architecture.md`](./docs/architecture.md) and [`AGENTS.md`](./AGENTS.md).
+The five agent archetypes, their components, and where this host stands against
+them: [`docs/archetypes/`](./docs/archetypes/README.md).
 
 ## Security
 

@@ -38,7 +38,7 @@ declared-vs-discovered provenance in its registry (`packages/opencode/src/tool/r
 sent to the model (prompt bloat, or worse, leaking internal names); and a tool
 whose existence came from discovery is treated as if a human had declared it.
 
-**Our coverage.** ✅ `ToolSpec` (`agent/src/types.ts`) carries `name`,
+**Our coverage.** ✅ `ToolSpec` (`src/types.ts`) carries `name`,
 `description`, `inputSchema`, `serverName`, and standard MCP `annotations`;
 `AgentRuntime.seedToolAnnotations` seeds risk from them. We do **not** separate a
 human-facing `title`, and provenance is implicit (everything is discovered from
@@ -71,7 +71,7 @@ repeated spawns are avoided.
 shadow each other; a server that dies takes the host with it.
 
 **Our coverage.** ✅ `StdioToolset`, `HttpToolset`, `AggregateToolset`
-(`agent/src/mcp/`) with namespacing and per-server `cwd`/`env`. Server _pooling_
+(`src/mcp/`) with namespacing and per-server `cwd`/`env`. Server _pooling_
 across runs does not exist (each run spawns fresh) — acceptable for a CLI, a gap
 for a long-lived daemon.
 
@@ -149,8 +149,8 @@ interface ChatModel {
 ```
 
 **Reference.** `smolagents` (models as a pluggable seam), `opencode` (provider
-catalog + per-agent model). Our `AiSdkModel` + `ModelCatalog` (`agent/src/models/`,
-`agent/src/provider/ai-sdk.ts`).
+catalog + per-agent model). Our `AiSdkModel` + `ModelCatalog` (`src/models/`,
+`src/provider/ai-sdk.ts`).
 
 **Failure mode prevented.** Delegating the loop to a provider-hosted runner,
 where learned routing/decoding can no longer be applied (a stated golden rule:
@@ -297,4 +297,4 @@ db: .agent/agent.db
 expressed in one tool.
 
 **Our coverage.** ✅ `--config` (YAML or JSON, flags override), plus env vars
-(`agent/src/agent-config.ts`).
+(`src/agent-config.ts`).
