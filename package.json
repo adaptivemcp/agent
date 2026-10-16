@@ -42,7 +42,6 @@
   "dependencies": {
     "@adaptivemcp/approval": "^0.2.4",
     "@adaptivemcp/evaluation": "^0.4.0",
-    "@adaptivemcp/extension": "^0.5.0",
     "@adaptivemcp/graph-analysis": "^0.2.1",
     "@adaptivemcp/memory": "^0.4.0",
     "@adaptivemcp/middleware": "^0.1.2",
@@ -50,7 +49,6 @@
     "@adaptivemcp/routing": "^0.4.0",
     "@adaptivemcp/runtime": "^0.4.0",
     "@adaptivemcp/spec": "^0.4.0",
-    "@adaptivemcp/telemetry": "^0.1.7",
     "@adaptivemcp/thin-client": "^0.4.0",
     "@ai-sdk/anthropic": "^4.0.65",
     "@ai-sdk/google": "^4.0.82",

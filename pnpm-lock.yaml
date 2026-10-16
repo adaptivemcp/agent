@@ -22,9 +22,6 @@ importers:
       '@adaptivemcp/evaluation':
         specifier: ^0.4.0
         version: 0.4.0
-      '@adaptivemcp/extension':
-        specifier: ^0.5.0
-        version: 0.5.0
       '@adaptivemcp/graph-analysis':
         specifier: ^0.2.1
         version: 0.2.1
@@ -46,9 +43,6 @@ importers:
       '@adaptivemcp/spec':
         specifier: ^0.4.0
         version: 0.4.0
-      '@adaptivemcp/telemetry':
-        specifier: ^0.1.7
-        version: 0.1.7
       '@adaptivemcp/thin-client':
         specifier: ^0.4.0
         version: 0.4.0
