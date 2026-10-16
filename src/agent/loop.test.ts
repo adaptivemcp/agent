@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { LLAMA_CPP_CAPABILITIES } from "@adaptivemcp/routing";
 import type { Middleware } from "@adaptivemcp/middleware";
 import { AggregateToolset, InMemoryToolset } from "../mcp/toolset.js";
-import { delegatableTools, taskToolset } from "../delegation.js";
+import { taskToolset } from "../delegation.js";
 import { AgentRuntime } from "../runtime.js";
 import { ModelCatalog } from "../models/catalog.js";
 import { ScriptedModel, type ScriptedTurn } from "../provider/scripted.js";
@@ -1126,47 +1126,49 @@ describe("agent loop", () => {
 
     it("carries out a delegation end-to-end: the parent gets a result, not a transcript", async () => {
       const servers = toolset();
-      const parent = new AgentRuntime({
-        dbPath: ":memory:",
-        sessionId: "s27",
-        requestApproval: () => true,
-        invoke: (name, input) => aggregate.callTool(name, input),
-      });
-      // The child's loop is a real one: its own runtime, session and tools.
+      let specs: ToolSpec[] = [];
+      // Assembled the way the CLI does it: the toolset joins the aggregate before
+      // the tool list exists, so it reads the parent's tools at call time.
       const delegation = taskToolset({
         session: "s27",
-        run: async (task, sessionId) => {
+        tools: () => specs,
+        taskToolName: "delegate_task",
+        run: async (task, sessionId, context) => {
           const child = new AgentRuntime({
             store: parent.adaptive.memory,
             sessionId,
             requestApproval: () => false,
             invoke: (name, input) => aggregate.callTool(name, input),
           });
-          const run = await runAgent({
+          const childRun = await runAgent({
             model: new ScriptedModel([
               { toolCalls: [{ name: "search_customer", input: { id: 7 } }] },
               { text: "found the customer" },
             ]),
-            tools: delegatableTools(await aggregate.listTools(), "delegate_task"),
+            tools: context.tools,
             executor: child,
             messages: [
               { role: "system", content: "You are a sub-agent." },
               { role: "user", content: task.prompt },
             ],
           });
-          child.close();
+          child.close(); // the child does not own the shared store
           return {
             status: "completed" as const,
-            summary: run.messages.at(-1)?.content ?? "",
-            steps: run.steps,
+            summary: childRun.messages.at(-1)?.content ?? "",
+            steps: childRun.steps,
             sessionId,
           };
         },
       });
-      // Exactly how the CLI assembles it: MCP tools and the delegation tool in one
-      // aggregate, so `delegate_task` takes the normal execution path.
       const aggregate = new AggregateToolset([servers, delegation]);
-      const specs = await aggregate.listTools();
+      specs = await aggregate.listTools();
+      const parent = new AgentRuntime({
+        dbPath: ":memory:",
+        sessionId: "s27",
+        requestApproval: () => true,
+        invoke: (name, input) => aggregate.callTool(name, input),
+      });
       const model = new ScriptedModel([
         {
           toolCalls: [

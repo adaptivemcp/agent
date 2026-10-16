@@ -2,24 +2,47 @@ import { describe, it, expect } from "vitest";
 import {
   TASK_TOOL,
   childSessionId,
-  delegatableTools,
   describeCompletion,
+  narrowTools,
   subagentApproval,
   taskToolset,
+  type DelegationContext,
   type SubagentResult,
   type SubagentTask,
 } from "./delegation.js";
+import type { AgentDefinition } from "./skills.js";
 import type { ToolSpec } from "./types.js";
 
 function completed(sessionId: string, summary = "done"): SubagentResult {
   return { status: "completed", summary, steps: 2, sessionId };
 }
 
+/** A production-shaped parent tool list: namespaced MCP tools + delegation. */
+const PARENT_TOOLS: ToolSpec[] = [
+  { name: "delegate_task", inputSchema: {} },
+  { name: "adaptive_search_customer", inputSchema: {} },
+  { name: "adaptive_deploy_service", inputSchema: {} },
+];
+
 function toolset(
-  run: (task: SubagentTask, sessionId: string) => Promise<SubagentResult>,
-  extra: { notify?: (message: string) => void; maxBackground?: number } = {},
+  run: (
+    task: SubagentTask,
+    sessionId: string,
+    context: DelegationContext,
+  ) => Promise<SubagentResult>,
+  extra: {
+    notify?: (message: string) => void;
+    maxBackground?: number;
+    agents?: AgentDefinition[];
+  } = {},
 ) {
-  return taskToolset({ session: "s1", run, ...extra });
+  return taskToolset({
+    session: "s1",
+    tools: () => PARENT_TOOLS,
+    taskToolName: "delegate_task",
+    run,
+    ...extra,
+  });
 }
 
 describe("delegation", () => {
@@ -58,7 +81,9 @@ describe("delegation", () => {
   });
 
   it("names the child session under the parent, and labels a specialist", async () => {
-    const tools = toolset(async (_task, sessionId) => completed(sessionId));
+    const tools = toolset(async (_task, sessionId) => completed(sessionId), {
+      agents: [{ name: "reviewer", description: "reads only", instructions: "Review." }],
+    });
 
     const result = await tools.callTool(TASK_TOOL, {
       description: "review",
@@ -179,14 +204,142 @@ describe("delegation", () => {
     });
 
     it("drops the delegation tool from a child's tools, bounding recursion", () => {
-      const parentTools: ToolSpec[] = [
-        { name: "delegate_task", inputSchema: {} },
-        { name: "search_customer", inputSchema: {} },
-      ];
+      const names = narrowTools(PARENT_TOOLS, undefined, "delegate_task").map((spec) => spec.name);
 
-      expect(delegatableTools(parentTools, "delegate_task").map((spec) => spec.name)).toEqual([
-        "search_customer",
+      expect(names).toEqual(["adaptive_search_customer", "adaptive_deploy_service"]);
+    });
+
+    it("lets a definition narrow the child's tools, never widen them", () => {
+      // An allowlist is a filter over the parent's tools. Naming a tool the parent
+      // does not have grants nothing — the intersection property, by construction.
+      const reviewer: AgentDefinition = {
+        name: "reviewer",
+        description: "reads, never acts",
+        instructions: "Review.",
+        tools: ["search_customer", "delete_everything"],
+      };
+
+      const names = narrowTools(PARENT_TOOLS, reviewer, "delegate_task").map((spec) => spec.name);
+
+      expect(names).toEqual(["adaptive_search_customer"]);
+    });
+
+    it("lets a definition deny tools on top of the parent's policy", () => {
+      const readOnly: AgentDefinition = {
+        name: "read-only",
+        description: "no deploys",
+        instructions: "Do not deploy.",
+        deny: ["deploy_service"],
+      };
+
+      const names = narrowTools(PARENT_TOOLS, readOnly, "delegate_task").map((spec) => spec.name);
+
+      expect(names).toEqual(["adaptive_search_customer"]);
+    });
+
+    it("matches a bare name under a server prefix, and a full name as given", () => {
+      const exact: AgentDefinition = {
+        name: "exact",
+        description: "fully named",
+        instructions: "X",
+        tools: ["adaptive_search_customer"],
+      };
+      const bare: AgentDefinition = {
+        name: "bare",
+        description: "bare name",
+        instructions: "X",
+        tools: ["search_customer"],
+      };
+
+      expect(narrowTools(PARENT_TOOLS, exact, "delegate_task").map((s) => s.name)).toEqual([
+        "adaptive_search_customer",
       ]);
+      expect(narrowTools(PARENT_TOOLS, bare, "delegate_task").map((s) => s.name)).toEqual([
+        "adaptive_search_customer",
+      ]);
+    });
+  });
+
+  describe("named agents", () => {
+    const reviewer: AgentDefinition = {
+      name: "reviewer",
+      description: "reads only",
+      instructions: "Read, then report findings.",
+      tools: ["search_customer"],
+    };
+
+    it("hands the definition and the narrowed tools to the runner", async () => {
+      let seen: DelegationContext | undefined;
+      const tools = toolset(
+        async (_task, sessionId, context) => {
+          seen = context;
+          return completed(sessionId);
+        },
+        { agents: [reviewer] },
+      );
+
+      await tools.callTool(TASK_TOOL, {
+        description: "review",
+        prompt: "review it",
+        agent: "reviewer",
+      });
+
+      expect(seen?.definition?.name).toBe("reviewer");
+      expect(seen?.definition?.instructions).toBe("Read, then report findings.");
+      expect(seen?.tools.map((spec) => spec.name)).toEqual(["adaptive_search_customer"]);
+    });
+
+    it("fails an unknown agent instead of acting as a generalist", async () => {
+      let spawned = false;
+      const tools = toolset(
+        async (_task, sessionId) => {
+          spawned = true;
+          return completed(sessionId);
+        },
+        { agents: [reviewer] },
+      );
+
+      const result = await tools.callTool(TASK_TOOL, {
+        description: "x",
+        prompt: "y",
+        agent: "nope",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('unknown agent "nope"');
+      expect(result.error).toContain("reviewer"); // names what is available
+      expect(spawned).toBe(false);
+    });
+
+    it("with no agent, behaves as an unnarrowed generalist", async () => {
+      let seen: DelegationContext | undefined;
+      const tools = toolset(
+        async (_task, sessionId, context) => {
+          seen = context;
+          return completed(sessionId);
+        },
+        { agents: [reviewer] },
+      );
+
+      await tools.callTool(TASK_TOOL, { description: "x", prompt: "y" });
+
+      expect(seen?.definition).toBeUndefined();
+      expect(seen?.tools.map((spec) => spec.name)).toEqual([
+        "adaptive_search_customer",
+        "adaptive_deploy_service",
+      ]);
+    });
+
+    it("says so when no skill declares a tool policy at all", async () => {
+      const tools = toolset(async (_task, sessionId) => completed(sessionId));
+
+      const result = await tools.callTool(TASK_TOOL, {
+        description: "x",
+        prompt: "y",
+        agent: "reviewer",
+      });
+
+      expect(result.error).toContain("no skill declares a tool policy");
     });
   });
 
