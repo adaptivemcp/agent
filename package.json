@@ -1,6 +1,6 @@
 {
   "name": "@adaptivemcp/agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The Adaptive MCP agent: an MCP-native agent host that closes the adaptation loop by owning both the LLM completion and the MCP execution.",
   "type": "module",
   "license": "MIT",
