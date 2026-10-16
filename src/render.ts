@@ -193,6 +193,19 @@ export function createReplRenderer(options: ReplRendererOptions): ReplRenderer {
         if (event.rationale) output.write(color.dim(`      ${preview(event.rationale, 160)}\n`));
         break;
       }
+      case "suspended":
+        // The run stopped for a human. Nothing was executed, so say what is being
+        // asked rather than leaving a silent gap in the transcript.
+        ensureNewline();
+        output.write(color.dim(`  ⏸ paused: ${event.question}\n`));
+        break;
+      default: {
+        // Exhaustiveness: a new `AgentEvent` variant must be handled here rather
+        // than silently rendering nothing (which is how `suspended` slipped past
+        // this switch when the loop gained it).
+        const unhandled: never = event;
+        void unhandled;
+      }
     }
   };
   const prompt = (text: string): void => {
