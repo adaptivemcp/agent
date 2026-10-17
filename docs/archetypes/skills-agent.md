@@ -102,7 +102,8 @@ The loader is deliberately outside the runtime: a skill set becomes an ordinary
 **toolset** (`skillsToolset`), so reading one takes the same path as any MCP tool
 — approval gate, telemetry, execution graph — and no protocol noun was added
 (ADR-004). A malformed `SKILL.md` warns and is skipped rather than failing the
-run, and the read tool cannot leave a skill's directory.
+run, and the read tool cannot leave a skill's directory: real paths are resolved,
+so a symlink out is refused rather than followed.
 
 ## Gap
 

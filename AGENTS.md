@@ -155,8 +155,9 @@ and a name defined at a higher level wins, so a project skill overrides the user
 copy of the same name rather than merging; the prompt groups the listing by level so
 each skill's provenance is visible. Only `name`/`description` enter the system
 prompt — progressive disclosure — and the body is fetched on demand; the read tool
-is confined to the skill's own directory, and a malformed `SKILL.md` is warned about
-and skipped rather than failing the run.
+is confined to the skill's own directory — real paths are resolved, so a symlink out is
+refused, not followed — and a malformed `SKILL.md` is warned about and skipped rather
+than failing the run.
 
 **Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
 sub-agent that runs in its own session and returns only its result. Two rules
