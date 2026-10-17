@@ -53,6 +53,7 @@ import { localSystemOneBackend, type DecisionBackend } from "./decision/systemon
 import { TieredSystemOneBackend } from "./decision/tiered.js";
 import {
   SystemOneAdvisor,
+  type DecisionCall,
   type DecisionToolInfo,
   type SystemOneDecision,
 } from "./decision/advisor.js";
@@ -241,6 +242,15 @@ export class AgentRuntime implements AgentExecutor {
   private lastSystemOne?: SystemOneDecision;
   /** Which backend produced `lastSystemOne` (tier attribution, for `/decision`). */
   private lastSystemOneBackend?: string;
+  /**
+   * What the decision layer's own calls have cost this run. A decision call is
+   * the run's own model call — the remote tier is a real, billed completion —
+   * made *outside* the tool loop, so no tool telemetry ever sees it; the run
+   * summary and `/decision` are where it is accounted for.
+   */
+  private decisionCalls = 0;
+  private decisionTokens: number | undefined;
+  private decisionMs = 0;
 
   constructor(options: AgentRuntimeOptions) {
     this.invoke = options.invoke;
@@ -925,6 +935,7 @@ export class AgentRuntime implements AgentExecutor {
       backend,
       minConfidence: options.minConfidence,
       onError: options.onError,
+      onCall: (call) => this.recordDecisionCall(call),
     });
 
     return async (request) => {
@@ -939,6 +950,7 @@ export class AgentRuntime implements AgentExecutor {
           costWeight: integration.costWeight,
           latencyWeight: integration.latencyWeight,
         })),
+        step: request.step,
       });
       if (!decision) return undefined;
       this.lastSystemOne = decision;
@@ -980,7 +992,31 @@ export class AgentRuntime implements AgentExecutor {
     }
     if (decision.decodingProfile) parts.push(`decoding ${decision.decodingProfile}`);
     if (this.lastSystemOneBackend) parts.push(`backend ${this.lastSystemOneBackend}`);
-    return `${parts.join(", ")}\n  ${decision.rationale}`;
+    const cost = this.decisionCalls > 0 ? `\n  this run:${this.decisionCallSummary()}` : "";
+    return `${parts.join(", ")}\n  ${decision.rationale}${cost}`;
+  }
+
+  /**
+   * What the decision layer has cost this run, as a run-summary suffix, or `""`
+   * when it made no call — so a run without System One prints exactly what it
+   * printed before. `decision_tokens` is omitted rather than reported as `0`
+   * when no backend reported usage (see `reportedTokens`).
+   */
+  decisionCallSummary(): string {
+    if (this.decisionCalls === 0) return "";
+    const tokens =
+      this.decisionTokens !== undefined ? ` decision_tokens=${this.decisionTokens}` : "";
+    return ` decisions=${this.decisionCalls}${tokens} decision_ms=${this.decisionMs}`;
+  }
+
+  /** Fold one reported decision call into this run's totals. */
+  private recordDecisionCall(call: DecisionCall): void {
+    this.decisionCalls += 1;
+    this.decisionMs += call.durationMs;
+    if (call.usage) {
+      this.decisionTokens =
+        (this.decisionTokens ?? 0) + (call.usage.inputTokens ?? 0) + (call.usage.outputTokens ?? 0);
+    }
   }
 
   /** Tool metadata as a compact list for the System One decision state. */

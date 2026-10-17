@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SystemOneAdvisor } from "./advisor.js";
+import type { DecisionCall } from "./advisor.js";
 import type {
   DecisionBackend,
   SystemOneQuestion,
@@ -124,5 +125,82 @@ describe("SystemOneAdvisor", () => {
     }).decide(INPUT);
     expect(decision).toBeUndefined();
     expect(errors).toHaveLength(1);
+  });
+
+  it("reports the call and its tokens, so the run can account for them", async () => {
+    // A decision call is the run's own model call made outside the tool loop:
+    // no tool telemetry sees it, so this report is the only accounting a host
+    // gets (#73's twin).
+    const calls: DecisionCall[] = [];
+    const backend = new FakeBackend(
+      response({
+        model: {
+          type: "choice",
+          choice: "beta",
+          probabilities: { alpha: 0.1, beta: 0.8 },
+          confidence: 0.82,
+        },
+      }),
+    );
+
+    await new SystemOneAdvisor({ backend, onCall: (call) => calls.push(call) }).decide({
+      ...INPUT,
+      step: 3,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      step: 3,
+      ok: true,
+      usage: { inputTokens: 100, outputTokens: 4 },
+    });
+    expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reports a failed call too, and omits tokens a backend never reported", async () => {
+    const calls: DecisionCall[] = [];
+    const onCall = (call: DecisionCall) => calls.push(call);
+
+    // The backend threw: the call was made (and paid for) before it failed.
+    await new SystemOneAdvisor({ backend: new ThrowingBackend(), onCall }).decide(INPUT);
+    // The backend answered, but reported no usage — `tokens=0` would claim the
+    // decision was free, which is not what happened.
+    const silent = new FakeBackend({
+      model: "tev1",
+      answers: {
+        use_tools: { type: "noul", noul: 0.95 },
+      },
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    await new SystemOneAdvisor({ backend: silent, onCall }).decide(INPUT);
+
+    expect(calls.map((call) => call.ok)).toEqual([false, true]);
+    expect(calls[0]?.usage).toBeUndefined();
+    expect(calls[1]?.usage).toBeUndefined();
+  });
+
+  it("reports a call whose verdict was discarded, because it was paid for anyway", async () => {
+    // Every answer below the confidence floor: the advisor declines, so the loop
+    // never applies the decision — and the tokens were still spent.
+    const calls: DecisionCall[] = [];
+    const backend = new FakeBackend(
+      response({
+        decoding: {
+          type: "choice",
+          choice: "creative",
+          probabilities: { deterministic: 0.4, balanced: 0.35, creative: 0.25 },
+          confidence: 0.1,
+        },
+      }),
+    );
+
+    const decision = await new SystemOneAdvisor({
+      backend,
+      onCall: (call) => calls.push(call),
+    }).decide({ message: "hi", models: [{ id: "alpha" }], tools: [{ toolName: "search" }] });
+
+    expect(decision).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ ok: true, usage: { inputTokens: 100, outputTokens: 4 } });
   });
 });

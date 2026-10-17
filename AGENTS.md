@@ -247,7 +247,12 @@ ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
   most two backends — construction throws on more). `onFallback` reports a
   tier that failed and was retried; `onError` still means every tier failed.
   `lastDecisionSummary()` (REPL `/decision`) attributes the tier that answered,
-  e.g. `backend openai:… (fell back from ollama:…)`. The opt-in live check is
+  e.g. `backend openai:… (fell back from ollama:…)`. Every backend call is
+  reported (`SystemOneAdvisor`'s `onCall`) and accumulated as `decisions=…
+decision_tokens=… decision_ms=…` in the run summary, and `/decision` carries
+  the same running total: a decision is the run's **own** model call made
+  outside the tool loop, so no tool telemetry ever sees it (#73's twin — the
+  planning pass is the other one). The opt-in live check is
   `pnpm test:system1` (`SYSTEM1_LIVE=1`, skipped when the backend is absent).
 - `seedToolAnnotations(specs, { defaultRisk })` — seed static risk from standard
   MCP tool annotations (falling back to a local `defaultRisk` for servers that
