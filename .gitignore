@@ -10,3 +10,6 @@ coverage/
 tools-metadata.yaml
 .env
 .env.*
+
+# `prepare` writes the pending release (version + notes) here
+.release/

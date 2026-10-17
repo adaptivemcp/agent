@@ -38,7 +38,20 @@ pnpm dev -- --prompt "..." --server "fs=npx ..."   # one-shot
 pnpm dev -- --compress --history /tmp/agent-history.json --session dev
 pnpm dev -- --config agent.yaml   # options from a file (flags override it)
 pnpm dev -- --help # CLI (tsx)
+pnpm release:prepare minor      # release, phase 1: version + notes + gates + build (no OTP)
+pnpm release:publish --otp CODE # release, phase 2: publish + commit + tag + notes (fast)
 ```
+
+**Releasing is two phases, because they need different things.**
+`pnpm release:prepare <patch|minor|major>` is the slow, OTP-free half: it refuses
+a dirty tree, refuses a version already on the registry, derives the release notes
+from the commits since the last tag, runs the gates, builds, bumps `package.json`,
+and stores the pending release in `.release/state.json`.
+`pnpm release:publish --otp <CODE>` is the fast half and the **only** step that
+needs the second factor — so the code cannot expire while tests run. It publishes,
+commits the bump, tags with those notes (`git tag -F`, so `tag.gpgSign` cannot
+open an editor), and opens a GitHub Release. Nobody writes release prose by hand,
+and `publish` refuses a tree that changed beyond `package.json`.
 
 **Config file.** `--config <file>` (YAML or JSON) holds the "how to run it"
 options (`servers`, `model`, `db`/`yaml`, `session`, `maxSteps`, `system1*`, …),
