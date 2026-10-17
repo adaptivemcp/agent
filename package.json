@@ -38,6 +38,8 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "QC_MCP_INTEGRATION=1 vitest run src/mcp/qc-mcp.integration.test.ts",
     "test:system1": "SYSTEM1_LIVE=1 vitest run src/decision/systemone.live.test.ts",
+    "test:skills-scan": "SKILLS_SCAN_LIVE=1 vitest run src/skill-scan.live.test.ts",
+    "skills:scan": "tsx scripts/scan-skills.ts",
     "dev": "tsx src/cli.ts",
     "demo": "tsx examples/vertical-slice.ts"
   },

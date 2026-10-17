@@ -110,7 +110,11 @@ do nothing at all in the REPL.)
   prompt nor readable, until you vouch for it (`--skills-trust <name>` records its
   content hash in `$XDG_CONFIG_HOME/agent/skills.trust.json`) or a scan clears it.
   `--skills-list` prints what was found, with each skill's level, hash and trust
-  status, and needs no MCP server.
+  status, and needs no MCP server. `pnpm skills:scan` runs a scanner
+  (`cisco-ai-defense/mcp-scanner`, keyless `yara`) over the skills and records each
+  verdict against its content hash: a flag blocks the skill, a clean scan vouches for
+  it, and both are re-checked on every load. That step is deliberately out of band —
+  the agent never scans or fetches at run time.
 - **Delegation.** `--task` exposes a `task` tool: the model can hand a
   self-contained job to a **sub-agent** that runs in its own session and returns
   only its result — so a broad search or a long review cannot flood the caller's
