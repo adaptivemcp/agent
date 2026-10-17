@@ -70,6 +70,64 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Pause/resume is a session-scoped contract, so everything that would leave a
+  // paused run unfindable or self-contradictory fails fast as usage.
+  if (args.pause || args.resume || args.suspensions || args.deny) {
+    const usageError = (message: string): void => {
+      console.error(`error: ${message}`);
+      process.exitCode = ExitCode.Usage;
+    };
+    if (!args.db) {
+      usageError(
+        "--pause/--resume/--suspensions need --db <path>: a paused run must outlive the process",
+      );
+      return;
+    }
+    if (!args.session) {
+      usageError(
+        "--pause/--resume/--suspensions need --session <id>: that is how a paused run is found",
+      );
+      return;
+    }
+    if (args.autoApprove && (args.pause || args.resume)) {
+      usageError('--yes means "never ask", which is the opposite of --pause/--resume');
+      return;
+    }
+    if (args.deny && !args.resume) {
+      usageError("--deny applies to --resume <id>");
+      return;
+    }
+    if (args.resume && args.prompt !== undefined) {
+      usageError("--resume continues the paused conversation; drop --prompt");
+      return;
+    }
+    // Without a prompt the run *is* the REPL, which asks at once — pausing there
+    // would replace a prompt with a suspension nobody asked for.
+    if (args.pause && !args.resume && (args.interactive || args.prompt === undefined)) {
+      usageError("--pause is for a non-interactive run (needs --prompt); the REPL asks directly");
+      return;
+    }
+  }
+
+  // A pure store read, so it must work without any MCP server.
+  if (args.suspensions) {
+    const runtime = new AgentRuntime({
+      dbPath: args.db,
+      sessionId: args.session,
+      invoke: async () => ({ ok: false, error: "no server: --suspensions only reads the store" }),
+    });
+    const pending = runtime.pendingSuspensions();
+    if (pending.length === 0) {
+      console.log(`[paused] none for session ${args.session}`);
+    } else {
+      for (const suspension of pending) {
+        console.log(`${suspension.id}	${suspension.createdAt}	${suspension.question}`);
+      }
+    }
+    runtime.close();
+    return;
+  }
+
   const fallbackServer = exampleServerOptions();
   const serverSpecs: ServerSpec[] =
     args.servers.length > 0
@@ -260,6 +318,9 @@ async function main(): Promise<void> {
       yamlPath: args.yaml,
       sessionId,
       workflowId: args.workflow,
+      // A resumed run keeps pausing: a *second* confirmation becomes its own
+      // suspension rather than a denial.
+      pauseOnApproval: args.pause || args.resume !== undefined,
       invoke: (name, input, _serverName, context) => tools.callTool(name, input, context),
       middleware,
       routerModels: catalog.routingOptions(),
@@ -434,6 +495,32 @@ async function main(): Promise<void> {
       };
     }
 
+    // `--resume <id>`: answer the paused call and continue the conversation it
+    // stopped in. The messages saved with the suspension are reused, so the model
+    // is not asked to redo the turn — the unresolved call simply runs now.
+    if (args.resume !== undefined) {
+      const suspension = runtime.resumeSuspension(args.resume, { approve: !args.deny });
+      const messages = suspension ? runtime.resumeMessages(suspension) : [];
+      if (!suspension || messages.length === 0) {
+        console.error(
+          `error: no resumable paused run "${args.resume}" in session ${sessionId}` +
+            (suspension ? " (it has no saved conversation)" : ""),
+        );
+        process.exitCode = ExitCode.Usage;
+        return;
+      }
+      console.log(`[resume] ${suspension.question} → ${args.deny ? "denied" : "approved"}`);
+      const result = await runAgent({
+        ...runConfig,
+        messages,
+        onEvent: (event) => renderOneShot(event, args.verbose),
+      });
+      console.log(`
+[agent] stop=${result.stopReason} steps=${result.steps}`);
+      if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
+      return;
+    }
+
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       await runRepl({
@@ -488,6 +575,7 @@ async function main(): Promise<void> {
     });
 
     console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}`);
+    if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
     if (denials > 0) {
       console.log(
         `[agent] ${denials} tool call(s) denied by the approval gate; exiting ${ExitCode.ApprovalDenied}`,
@@ -556,6 +644,23 @@ function finalAssistantText(messages: ChatMessage[]): string {
  */
 function isGateDenial(result: ToolExecutionResult): boolean {
   return result.executed === false;
+}
+
+/**
+ * Report a run that paused for approval: persist the conversation on the
+ * suspension (so `--resume` continues it) and point at the way to answer. The exit
+ * code is distinct from a denial because nothing failed — the run is waiting, not
+ * lost.
+ */
+function reportPaused(runtime: AgentRuntime, messages: ChatMessage[]): void {
+  const suspension = runtime.saveResumeState(messages);
+  if (!suspension) return;
+  console.log(`
+[paused] ${suspension.question}`);
+  console.log(
+    `[paused] continue with: --resume ${suspension.id} [--deny]  (same --session and --db)`,
+  );
+  process.exitCode = ExitCode.Paused;
 }
 
 /** The package version, read from `package.json` at runtime (never bundled). */

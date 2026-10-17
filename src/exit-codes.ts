@@ -14,6 +14,12 @@ export const ExitCode = {
   Config: 3,
   /** A tool call the host denied (approval gate). */
   ApprovalDenied: 4,
+  /**
+   * The run paused for a human decision and can be continued: answer it with
+   * `--resume <id>` (pause/resume). Distinct from `4` because nothing failed —
+   * the work is waiting, not lost.
+   */
+  Paused: 5,
 } as const;
 
 export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];

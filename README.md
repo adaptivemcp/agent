@@ -77,6 +77,13 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   there is nobody to ask, so such a tool is denied (fail closed)** — the tool
   does not run, the call is recorded as a failure, and the run exits `4`. Pass
   `--yes` to auto-approve instead; that is the only way to opt in.
+- **Pausing a run.** In a non-interactive run, `--pause` turns a
+  `require_confirmation` into a **suspension** instead of a denial: the question is
+  recorded, the run stops with exit `5`, and the work is _waiting_ rather than lost.
+  `--suspensions` lists the session's paused runs, and `--resume <id>` continues the
+  conversation it stopped in — the unresolved call simply runs, so the model is not
+  asked to redo the turn (`--deny` refuses it instead). All three need `--db` and
+  `--session`.
 - **Learned context.** Before each turn the agent injects a compact summary of
   observed tool reliability/insights into the system prompt (progressive
   disclosure of evaluation output); `--no-context` disables it.
@@ -384,8 +391,8 @@ pnpm dev -- \
   store and the derived view of the agent's own store (the MCP server keeps its
   own).
 - Exit codes are stable: `0` ok, `1` runtime error, `2` usage/no-server,
-  `3` provider/catalog config, `4` the gate blocked at least one call
-  (`src/exit-codes.ts`). `4` describes the run, not one call: the model still
+  `3` provider/catalog config, `4` the gate blocked at least one call, `5` the run
+  paused for a decision and can be resumed (`src/exit-codes.ts`). `4` describes the run, not one call: the model still
   receives the denial and may finish its turn, but a supervising script can tell
   that something was refused.
 

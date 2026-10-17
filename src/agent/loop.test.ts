@@ -1200,4 +1200,125 @@ describe("agent loop", () => {
       await servers.close();
     });
   });
+
+  describe("pause / resume (host)", () => {
+    const spec: ToolSpec = { name: "deploy_service", inputSchema: {} };
+
+    /** A runtime that pauses confirmation instead of denying it. */
+    async function pausing(sessionId: string): Promise<AgentRuntime> {
+      const tools = toolset();
+      const runtime = new AgentRuntime({
+        dbPath: ":memory:",
+        sessionId,
+        pauseOnApproval: true,
+        // No approver: the ordinary behaviour is to deny, which is what the pause
+        // path replaces.
+        invoke: (name, input) => tools.callTool(name, input),
+      });
+      // High risk, so the gate asks rather than allows.
+      runtime.seedToolAnnotations([spec], { defaultRisk: "high" });
+      return runtime;
+    }
+
+    it("pauses, reports it as blocked rather than failed, and records no tool failure", async () => {
+      const runtime = await pausing("s30");
+
+      const result = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+      expect(result.suspension?.id).toMatch(/^sus-/);
+      expect(result.decision).toBe("require_confirmation");
+      expect(result.executed).toBe(false);
+      // A question is not evidence about the tool: nothing is recorded against it.
+      expect(runtime.adaptive.memory.getTool("deploy_service")?.stats.invocations).toBe(0);
+      expect(runtime.pendingSuspensions()).toHaveLength(1);
+      runtime.close();
+    });
+
+    it("runs the call when the suspension is approved, once", async () => {
+      const runtime = await pausing("s31");
+      const paused = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+      const id = paused.suspension!.id;
+
+      const resumed = runtime.resumeSuspension(id, { approve: true });
+      expect(resumed?.status).toBe("answered");
+
+      const after = await runtime.execute({ id: "c2", name: "deploy_service", input: {} }, spec);
+      expect(after.ok).toBe(true);
+      expect(after.executed).not.toBe(false);
+
+      // One-shot: the grant covered that call only, so a repeat is a fresh question.
+      const again = await runtime.execute({ id: "c3", name: "deploy_service", input: {} }, spec);
+      expect(again.suspension).toBeDefined();
+      expect(runtime.pendingSuspensions()).toHaveLength(1);
+      runtime.close();
+    });
+
+    it("refuses the call when the suspension is denied", async () => {
+      const runtime = await pausing("s32");
+      const paused = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+      const resumed = runtime.resumeSuspension(paused.suspension!.id, { approve: false });
+      expect(resumed?.status).toBe("cancelled");
+
+      const after = await runtime.execute({ id: "c2", name: "deploy_service", input: {} }, spec);
+      expect(after.ok).toBe(false);
+      expect(after.error).toContain("blocked (require_confirmation)");
+      runtime.close();
+    });
+
+    it("answers a suspension once: a replay keeps the first answer", async () => {
+      const runtime = await pausing("s33");
+      const paused = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+      const id = paused.suspension!.id;
+
+      expect(runtime.resumeSuspension(id, { approve: false })?.status).toBe("cancelled");
+      // Already resolved, so the second attempt is refused rather than re-armed.
+      expect(runtime.resumeSuspension(id, { approve: true })).toBeUndefined();
+      runtime.close();
+    });
+
+    it("returns undefined for an unknown id", async () => {
+      const runtime = await pausing("s34");
+      expect(runtime.resumeSuspension("sus-nope", { approve: true })).toBeUndefined();
+      expect(runtime.suspension("sus-nope")).toBeUndefined();
+      runtime.close();
+    });
+
+    it("carries the conversation across a pause, so a resume continues the turn", async () => {
+      const runtime = await pausing("s35");
+      const paused = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+      const saved = runtime.saveResumeState([
+        { role: "user", content: "deploy it" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "c1", name: "deploy_service", input: {} }],
+        },
+      ]);
+
+      expect(saved?.resumeState?.messages).toHaveLength(2);
+      const reread = runtime.suspension(paused.suspension!.id);
+      expect(runtime.resumeMessages(reread!)).toHaveLength(2);
+      // An unrelated suspension still has no conversation.
+      expect(runtime.resumeMessages({ ...reread!, resumeState: { toolName: "x" } })).toEqual([]);
+      runtime.close();
+    });
+
+    it("still denies when pausing is off", async () => {
+      const tools = toolset();
+      const runtime = new AgentRuntime({
+        dbPath: ":memory:",
+        sessionId: "s36",
+        invoke: (name, input) => tools.callTool(name, input),
+      });
+      runtime.seedToolAnnotations([spec], { defaultRisk: "high" });
+
+      const result = await runtime.execute({ id: "c1", name: "deploy_service", input: {} }, spec);
+
+      expect(result.suspension).toBeUndefined();
+      expect(result.error).toContain("blocked (require_confirmation)");
+      runtime.close();
+    });
+  });
 });

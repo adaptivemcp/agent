@@ -209,6 +209,11 @@ ollama,openai`, or the same via `$SYSTEM1_BACKEND`) resolves to `backends` —
   **With no approver set, a `require_confirmation` tool is denied** (fail closed);
   auto-approval is an explicit opt-in (the CLI's `--yes`). A permissive default
   here once ran exactly the tools a policy had flagged for a human.
+- `pauseOnApproval` option, plus `pendingSuspensions()`, `resumeSuspension(id, {
+approve })`, `saveResumeState(messages)` and `resumeMessages(suspension)` —
+  pause/resume. A paused call returns `executed: false` (blocked, not failed) and
+  records **no** tool failure; the resume grant covers one call, and answering a
+  suspension is idempotent.
 - `queueMessage(text)` / `drainQueuedMessages()` — the message queue `review()`
   drains one step at a time. Delegation uses it so a background child reports its
   result without the parent polling.

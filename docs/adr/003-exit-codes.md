@@ -12,13 +12,14 @@ server" from "the model catalog failed".
 
 A small, **stable** taxonomy in `src/exit-codes.ts`:
 
-| Code | Meaning |
-| --- | --- |
-| `0` | success |
-| `1` | unexpected runtime failure |
-| `2` | bad usage (unknown flag, missing value, no server) |
-| `3` | provider/catalog/model configuration error |
-| `4` | a tool call the host denied (approval) |
+| Code | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| `0`  | success                                                            |
+| `1`  | unexpected runtime failure                                         |
+| `2`  | bad usage (unknown flag, missing value, no server)                 |
+| `3`  | provider/catalog/model configuration error                         |
+| `4`  | a tool call the host denied (approval)                             |
+| `5`  | the run paused for a decision and can be resumed (`--resume <id>`) |
 
 Once published these values are treated as stable.
 

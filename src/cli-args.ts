@@ -75,6 +75,17 @@ export interface CliArgs {
    * returns only its result. Off by default — it multiplies model work.
    */
   task: boolean;
+  /**
+   * Pause instead of denying when a tool needs confirmation in a non-interactive
+   * run, so a human can answer it later (`--resume`). Needs `--db`; exits `5`.
+   */
+  pause: boolean;
+  /** Continue a paused run: the id to answer (from `--suspensions`). */
+  resume?: string;
+  /** With `--resume`, refuse the paused call instead of approving it. */
+  deny: boolean;
+  /** List this session's paused runs and exit. */
+  suspensions: boolean;
 }
 
 /**
@@ -123,6 +134,9 @@ const DEFAULT_ARGS: CliArgs = {
   help: false,
   version: false,
   task: false,
+  pause: false,
+  deny: false,
+  suspensions: false,
 };
 
 /**
@@ -252,6 +266,18 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         break;
       case "--task":
         args.task = true;
+        break;
+      case "--pause":
+        args.pause = true;
+        break;
+      case "--resume":
+        args.resume = next();
+        break;
+      case "--deny":
+        args.deny = true;
+        break;
+      case "--suspensions":
+        args.suspensions = true;
         break;
       default:
         // A bare word is the positional prompt shorthand; anything else that
@@ -434,6 +460,11 @@ Options:
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming
   -y, --yes                     Auto-approve require_confirmation tools (no prompt)
+  --pause                       In a non-interactive run, pause (don't deny) a tool
+                                that needs confirmation; resume it later (needs --db)
+  --resume <id>                 Continue a paused run, approving the call it stopped on
+  --deny                        With --resume, refuse that call instead of approving it
+  --suspensions                 List this session's paused runs and exit (needs --db)
   --no-context                  Don't inject learned tool context into the prompt
   -v, --verbose                 Show decoding, graph, and view after a one-shot run
   --db <path>                   SQLite store path (default: in-memory)
