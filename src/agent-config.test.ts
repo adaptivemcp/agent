@@ -75,6 +75,8 @@ describe("loadAgentConfig", () => {
       /low\|medium\|high\|none/,
     );
     expect(() => loadAgentConfig(write("t.yaml", "system1Backend: gpt"))).toThrow(/ollama\|openai/);
+    expect(() => loadAgentConfig(write("t.yaml", "planInterval: 0"))).toThrow(/whole number/);
+    expect(() => loadAgentConfig(write("t.yaml", "planInterval: soon"))).toThrow(/whole number/);
     expect(() => loadAgentConfig(write("t.yaml", "servers: 5"))).toThrow(/servers/);
   });
 
@@ -87,6 +89,10 @@ describe("loadAgentConfig", () => {
     expect(() => loadAgentConfig(write("mode-bad.yaml", "mode: supervisor"))).toThrow(
       /coordinate\|route\|broadcast\|tasks/,
     );
+  });
+
+  it("reads a planning interval", () => {
+    expect(loadAgentConfig(write("plan.yaml", "planInterval: 4")).planInterval).toBe(4);
   });
 });
 

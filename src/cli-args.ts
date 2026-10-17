@@ -90,6 +90,12 @@ export interface CliArgs {
    */
   mode?: OrchestrationMode;
   /**
+   * Re-plan before the first step and every N steps after it, from the recorded
+   * state (`src/steps.ts`). Off unless set: a run that was not asked to plan does
+   * not pay for one.
+   */
+  planInterval?: number;
+  /**
    * Pause instead of denying when a tool needs confirmation in a non-interactive
    * run, so a human can answer it later (`--resume`). Needs `--db`; exits `5`.
    */
@@ -293,6 +299,15 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         args.mode = value;
         break;
       }
+      case "--plan-interval": {
+        const raw = next();
+        const value = Number(raw);
+        if (!Number.isInteger(value) || value < 1) {
+          throw new Error(`--plan-interval expects a whole number of steps >= 1, got "${raw}"`);
+        }
+        args.planInterval = value;
+        break;
+      }
       case "--pause":
         args.pause = true;
         break;
@@ -486,6 +501,8 @@ Options:
                                 add --db to keep it across runs
   --mode <name>                 Name the coordination pattern (implies the tools it
                                 needs): coordinate|route|broadcast|tasks
+  --plan-interval <n>           Plan before the first step, and re-plan every n
+                                steps, from the recorded state; off unless set
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming

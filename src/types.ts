@@ -206,6 +206,20 @@ export interface AgentExecutor {
 }
 
 /**
+ * A hook consulted **before each step**, with the conversation so far. Return a
+ * message to inject as a user turn — guidance the model sees before it acts — or
+ * nothing to leave the step alone.
+ *
+ * This is where a host puts something the model should *have*, rather than
+ * something it should be told once: the planning pass re-plans on an interval and
+ * injects the fresh plan here.
+ */
+export type Steerer = (context: {
+  step: number;
+  messages: ChatMessage[];
+}) => string | undefined | Promise<string | undefined>;
+
+/**
  * A guard consulted when the model **stops calling tools**, just before the loop
  * reports the run `completed`. Return a message to keep going — it is appended as
  * a user turn and the loop takes another step — or `undefined` to accept the stop.

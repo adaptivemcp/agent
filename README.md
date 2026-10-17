@@ -67,7 +67,8 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
-`/models`, `/graph` (the per-turn execution DAG), `/metadata`, `/cost`,
+`/models`, `/graph` (the per-turn execution DAG), `/steps` (this session's typed
+history — tasks, actions, plans), `/metadata`, `/cost`,
 `/policy`, `/drift`, `/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`,
 `/decision` (the last System One decision), `/reset`, `/exit`.
 
@@ -128,6 +129,18 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   guard**, so a run does not end while the list still holds a task that is neither
   completed, failed nor cancelled: the model is shown what is left and takes
   another step (`⚠` in the output), rather than the mode hoping it keeps going.
+- **Planning passes and typed memory steps.** Every tool call the loop attempts is
+  recorded as a typed **action step**, so a run's history reads "what was done" in
+  order — and a call the gate refused or paused is recorded as an attempt, not as a
+  tool failure. `--plan-interval <n>` (off unless set) adds a **planning pass**:
+  before the first step, and then every `n` steps, the run's model is asked for a
+  short plan **from the recorded state** — the task list, the action steps and the
+  previous plan, not the conversation — and the plan is recorded as a **plan step**
+  and injected as a turn the model can act on. A pass that cannot produce a plan is
+  reported and the step proceeds unplanned, so planning never fails a run. Because
+  the history is typed, one read (`store.getSteps`) returns tasks, actions and plans
+  in order, and `/steps` renders exactly that. A delegated child never plans: the
+  pass reads the leader's session.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool
@@ -171,6 +184,7 @@ db: .agent/agent.db
 yaml: .agent/tools-metadata.yaml
 session: dev
 maxSteps: 12
+planInterval: 3 # re-plan before the first step and every 3 after it
 defaultRisk: high
 compress: true
 system1Backend: ollama,openai # one tier, or a list for failover
@@ -178,7 +192,7 @@ system1Backend: ollama,openai # one tier, or a list for failover
 
 Allowed keys are the "how to run it" options: `servers`, `model`, `models`, `db`,
 `yaml`, `session`, `workflow`, `history`, `baseUrl`, `apiKey`, `maxSteps`,
-`routerMinInvocations`, `defaultRisk`, `system1`, `system1Model`,
+`planInterval`, `routerMinInvocations`, `defaultRisk`, `system1`, `system1Model`,
 `system1Backend`, `awaitJobs`, `noOllama`, `noStream`, `autoApprove`, `context`,
 `serverPolicy`, `compress`, `report`, `verbose`. An unknown key or a wrong type
 is an error, not a silent no-op. Per-run choices (`--prompt`, `--interactive`,

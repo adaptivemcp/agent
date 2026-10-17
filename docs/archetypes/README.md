@@ -57,7 +57,7 @@ Each archetype file follows the same shape:
 | **Shared task list** (+ orchestration modes)                     | ✅         |
 | **Skills** (SKILL.md, progressive disclosure, supply chain)      | 🟡         |
 | **Pipeline / step model** (conditions, loops, parallel, routing) | ❌         |
-| **Planning passes + typed memory steps**                         | ❌         |
+| **Planning passes + typed memory steps**                         | ✅         |
 
 ## Gap backlog
 
@@ -72,7 +72,7 @@ component_, not a commitment.
 | 3   | Shared task list + orchestration modes                                      | #37   | 2                              | medium     | **done** — `tasks_*` tools over the `spec` `Task`, and `--mode coordinate\|route\|broadcast\|tasks`                                               |
 | 4   | Skills: `SKILL.md` discovery, progressive disclosure, supply chain          | #38   | —                              | medium     | **mostly done** — loader + `--skills`; supply chain (fetch/cache/version) open                                                                    |
 | 5   | Pipeline / step model (conditions, loops, parallel, fan-out)                | #39   | 3 (task list)                  | large      | not started                                                                                                                                       |
-| 6   | Planning passes + typed memory steps (task/action/plan records)             | #40   | —                              | small      | not started                                                                                                                                       |
+| 6   | Planning passes + typed memory steps (task/action/plan records)             | #40   | —                              | small      | **done** — typed steps + `--plan-interval`                                                                                                        |
 
 ## Where each reference contributed
 

@@ -272,6 +272,71 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout.indexOf("[delegated]")).toBeGreaterThan(run.stdout.indexOf("stop=completed"));
   }, 30_000);
 
+  it("plans on an interval, from the recorded state rather than the conversation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-plan-"));
+    const db = join(dir, "agent.db");
+    const plan = JSON.stringify({ steps: ["echo something", "report back"], reasoning: "initial" });
+    model = new StubModelServer({
+      respond: (request) => {
+        const isPlanning = request.messages.some(
+          (message) =>
+            message.role === "system" && (message.content ?? "").includes("planning pass"),
+        );
+        if (isPlanning) return { text: plan };
+        const answered = request.messages.some((message) => message.role === "tool");
+        return answered
+          ? { text: "all steps done" }
+          : { toolName: "fixture_fixture_echo", toolInput: { text: "hi" } };
+      },
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "echo something",
+      "--plan-interval",
+      "1",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      db,
+      "--session",
+      "cli-e2e-plan",
+      "--max-steps",
+      "4",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("stop=completed");
+    // The plan reached the model as a turn it could act on.
+    expect(run.stdout).toContain("Plan (asked before step 1");
+
+    const planningRequests = model.requests.filter((request) =>
+      request.messages.some(
+        (message) => message.role === "system" && (message.content ?? "").includes("planning pass"),
+      ),
+    );
+    // Planned before the first step, then again before the second (interval 1).
+    expect(planningRequests).toHaveLength(2);
+    // The second pass reads the *record*, not the transcript: the tool call is in
+    // the recorded state even though the planning prompt is not the conversation.
+    expect(JSON.stringify(planningRequests[1]?.messages)).toContain("fixture_fixture_echo → ok");
+
+    // And the history reads back typed and in order: plan, the work, the re-plan.
+    const store = new MemoryStore({ path: db });
+    const history = store.getSteps?.("cli-e2e-plan") ?? [];
+    store.close();
+    expect(history.map((step) => step.kind)).toEqual(["plan", "action", "plan"]);
+
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
   it("wires the child runner for a mode that implies delegation", async () => {
     // `--mode route` implies `--task`, so the tool list has `delegate_task`. The
     // runner behind it has to be wired from the same decision, or the tool the

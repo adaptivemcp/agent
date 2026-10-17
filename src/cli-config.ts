@@ -10,6 +10,7 @@ import type {
   DecisionProvider,
   DecodingProvider,
   ModelSelector,
+  Steerer,
   StopGuard,
   ToolSpec,
 } from "./types.js";
@@ -38,6 +39,11 @@ export interface RunConfig {
    * orchestration mode uses it to finish a plan before the run ends).
    */
   stopGuard?: StopGuard;
+  /**
+   * Optional pre-step hook — the planning pass injects a fresh plan through it
+   * (see `Steerer`).
+   */
+  steer?: Steerer;
 }
 
 export interface RunConfigInput {
@@ -59,6 +65,8 @@ export interface RunConfigInput {
   system1?: System1Selection;
   /** Stop guard for the run's orchestration mode (see `RunConfig.stopGuard`). */
   stopGuard?: StopGuard;
+  /** Pre-step hook for the run's planning pass (see `RunConfig.steer`). */
+  steer?: Steerer;
 }
 
 /** Assemble the shared run inputs once, for any renderer to consume. */
@@ -83,5 +91,6 @@ export function buildRunConfig(input: RunConfigInput): RunConfig {
       : undefined,
     stream: !args.noStream,
     stopGuard: input.stopGuard,
+    steer: input.steer,
   };
 }
