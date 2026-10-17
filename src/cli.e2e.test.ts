@@ -152,6 +152,71 @@ describe("cli, end to end and offline", () => {
     rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 
+  it("keeps a `tasks`-mode run going until its list is finished", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-mode-"));
+    const db = join(dir, "agent.db");
+    model = new StubModelServer({
+      respond: (request) => {
+        // Turn index = how many assistant turns have happened so far.
+        const turn = request.messages.filter((message) => message.role === "assistant").length;
+        if (turn === 0) {
+          return { toolName: "tasks_create", toolInput: { title: "write the parser" } };
+        }
+        if (turn === 1) return { text: "all done" }; // tries to stop with t1 still open
+        if (turn === 2) {
+          return {
+            toolName: "tasks_update",
+            toolInput: { id: "t1", status: "completed", result: "parser written" },
+          };
+        }
+        return { text: "parser written, nothing left open" };
+      },
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "write the parser",
+      "--mode",
+      "tasks", // implies --task and --tasks
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      db,
+      "--session",
+      "cli-e2e-mode",
+      "--max-steps",
+      "6",
+    ]);
+
+    // The mode implied both toolsets, without either flag on the command line.
+    const offered = offeredTools(model.requests[0]!);
+    expect(offered).toContain("tasks_create");
+    expect(offered).toContain("delegate_task");
+
+    // The "all done" turn was refused: the stop guard sent the run back to work,
+    // and the run only completed once the list was empty.
+    expect(run.stdout).toContain("still holds work");
+    expect(run.stdout).toContain("parser written, nothing left open");
+    expect(run.stdout).toContain("stop=completed");
+    expect(run.stdout).toContain("steps=4");
+
+    const store = new MemoryStore({ path: db });
+    const tasks = store.getTasks?.("cli-e2e-mode") ?? [];
+    store.close();
+    expect(tasks.map((task) => ({ id: task.id, status: task.status, result: task.result }))).toEqual([
+      { id: "t1", status: "completed", result: "parser written" },
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
   it("keeps a background child working after the parent's turn ends", async () => {
     model = new StubModelServer({
       respond: (request) => {

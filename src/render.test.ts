@@ -73,6 +73,13 @@ describe("renderOneShot", () => {
     expect(text()).toBe('→ read_file({"path":"a.txt"})\n✓ hi\n✗ boom\n');
   });
 
+  it("shows an injected step, so a scripted run can see why it did not stop", () => {
+    const { sink, text } = capture();
+    renderOneShot({ type: "guard", message: "the list still holds work", step: 1 }, false, sink);
+    // Not verbose-only: being steered is a fact about the run, not a detail.
+    expect(text()).toBe("⚠ the list still holds work\n");
+  });
+
   it("suppresses verbose-only events when not verbose", () => {
     const { sink, text } = capture();
     renderOneShot({ type: "model_selected", model: "m1", step: 0 }, false, sink);

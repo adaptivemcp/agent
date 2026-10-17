@@ -172,6 +172,44 @@ describe("agent loop", () => {
     await tools.close();
   });
 
+  it("lets a host refuse to accept the model's stop, and asks again next step", async () => {
+    const tools = toolset();
+    const runtime = await runtimeFor(tools, "s-stop");
+    const events: AgentEvent[] = [];
+    const asked: number[] = [];
+    const model = new ScriptedModel([{ text: "I am done" }, { text: "actually finished" }]);
+
+    const result = await runAgent({
+      model,
+      tools: [],
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+      maxSteps: 5,
+      stopGuard: ({ step, messages }) => {
+        asked.push(step);
+        expect(messages.length).toBeGreaterThan(0);
+        return step === 0 ? "not yet: the list still has open work" : undefined;
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    // Refused once, accepted once: two model turns, and the run really completed.
+    expect(asked).toEqual([0, 1]);
+    expect(result.steps).toBe(2);
+    expect(result.stopReason).toBe("completed");
+    // The refusal is in the history as a user turn, so the next step can act on it…
+    expect(
+      result.messages.some(
+        (message) => message.role === "user" && message.content.includes("still has open work"),
+      ),
+    ).toBe(true);
+    // …and is emitted, so a renderer can say why the run did not end.
+    expect(events.some((event) => event.type === "guard")).toBe(true);
+
+    runtime.close();
+    await tools.close();
+  });
+
   it("records a failed call and feeds the error back to the model", async () => {
     const tools = toolset(1);
     const specs = await tools.listTools();

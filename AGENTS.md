@@ -166,6 +166,15 @@ toolset like the others, so writing a task lands in the same graph and telemetry
 any other call; `tasksPrompt()` is the system-prompt paragraph and lives with the
 tools so the two cannot drift.
 
+**Orchestration modes** (`src/modes.ts`) name the coordination pattern, off unless
+`--mode <name>`: `coordinate` / `route` / `broadcast` / `tasks`. A mode is run
+policy, not a protocol concept: it implies the toolsets it rests on (`task`, and
+`tasks_*` for `tasks`), contributes a paragraph to the system prompt, and — for
+`tasks` — passes a `StopGuard` into the loop (`RunAgentOptions.stopGuard`),
+consulted when the model stops calling tools. That guard is what makes "loop until
+the plan is done" a fact rather than a request; a delegated child deliberately does
+not inherit it, because a child is not the leader and cannot see the leader's list.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

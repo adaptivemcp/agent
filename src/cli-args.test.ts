@@ -213,6 +213,13 @@ describe("parseArgs coverage of the full flag surface", () => {
     expect(() => parseArgs(["--default-risk", "extreme"])).toThrow(/low\|medium\|high\|none/);
   });
 
+  it("accepts a named orchestration mode, and rejects a typo", () => {
+    expect(parseArgs(["--mode", "tasks"])).toMatchObject({ mode: "tasks" });
+    expect(() => parseArgs(["--mode", "supervisor"])).toThrow(
+      /coordinate\|route\|broadcast\|tasks/,
+    );
+  });
+
   it("accepts the short aliases", () => {
     const args = parseArgs(["-i", "-y", "-v", "-h"]);
     expect(args).toMatchObject({ interactive: true, autoApprove: true, verbose: true, help: true });

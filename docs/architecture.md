@@ -75,9 +75,13 @@ a protocol concept.
 | **Pause/resume** | `src/runtime.ts`    | With `--pause`, a `require_confirmation` call is recorded as a suspension and the run stops with exit `5` instead of denying it; `--resume <id>` continues the saved conversation so the blocked call simply runs. The record is `Suspension` (`@adaptivemcp/spec`), persisted by `memory`.                                                                                                                                                         |
 | **Delegation**   | `src/delegation.ts` | `--task` exposes `task`: a sub-agent in its own session that returns a **result, never its transcript**. It shares the parent's store (same graph and learned state, its own session) and inherits no authority — it never auto-approves and never receives `task` itself. `agent: "<name>"` names a definition whose policy is intersected with the parent's (`narrowTools`), so it can only narrow.                                               |
 | **Task list**    | `src/tasks.ts`      | `--tasks` exposes the shared list: `tasks_create` writes down intended work and the ids it `dependsOn`, `tasks_list` reads it back (or only what is _ready_), and `tasks_update` moves a task on — reporting what it left unmet or unblocked. Transitions are not policed: the record says what was decided, and the store's `readyTasks` is what orders it, treating an unknown dependency id as unfinished so a typo blocks rather than unblocks. |
+| **Modes**        | `src/modes.ts`      | `--mode <name>` names the coordination pattern (`coordinate`/`route`/`broadcast`/`tasks`), implies the toolsets it rests on, and adds its paragraph to the system prompt — so the shape of the work is a choice rather than an emergent accident. `tasks` goes furthest and passes a **stop guard** to the loop.                                                                                                                                    |
 
 All of these are opt-in, so a host that enables none behaves exactly as it did
-before.
+before. Modes are the one entry that is not a toolset: a mode is _run policy_, and
+`tasks` reaches into the loop with `RunAgentOptions.stopGuard` (`src/agent/loop.ts`)
+— consulted when the model stops calling tools, so a run cannot end while its list
+still has open work.
 The runtime's two supporting hooks are `queueMessage`/`drainQueuedMessages` (how a
 background child reports back without the parent polling) and the `store` option
 (how a child shares the parent's memory; a runtime handed a store does not close

@@ -89,6 +89,17 @@ export function taskView(task: Task): TaskView {
   return view;
 }
 
+/**
+ * The tasks that are neither done nor abandoned: `pending`, `in_progress` and
+ * `blocked`. A `failed` or `cancelled` task is terminal — the model decided it is
+ * not going to happen — so it does not keep a run alive (see `tasksStopGuard`).
+ */
+export function openTasks(store: Store, session: string): Task[] {
+  return (store.getTasks?.(session) ?? []).filter(
+    (task) => task.status === "pending" || task.status === "in_progress" || task.status === "blocked",
+  );
+}
+
 export interface TasksOptions {
   /**
    * The store that owns the list — the same store the runtime records telemetry
