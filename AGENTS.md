@@ -51,7 +51,13 @@ and stores the pending release in `.release/state.json`.
 needs the second factor — so the code cannot expire while tests run. It publishes,
 commits the bump, tags with those notes (`git tag -F`, so `tag.gpgSign` cannot
 open an editor), and opens a GitHub Release. Nobody writes release prose by hand,
-and `publish` refuses a tree that changed beyond `package.json`.
+and `publish` refuses a tree that changed beyond `package.json`. It also waits for
+the registry to **serve** the new version before it commits and tags — a tag is a
+claim about npm, and the registry is eventually consistent, so success from the
+publish command is not yet a version anyone can install. If the version never
+appears, `publish` stops before the tag and leaves the prepared tree intact (a
+re-run finishes it); `--skip-verify` is only for a machine that cannot read the
+registry at all.
 
 **Config file.** `--config <file>` (YAML or JSON) holds the "how to run it"
 options (`servers`, `model`, `db`/`yaml`, `session`, `maxSteps`, `system1*`, …),

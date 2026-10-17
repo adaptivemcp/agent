@@ -18,11 +18,19 @@
  *   node scripts/release.ts prepare patch|minor|major [--dry-run]
  *   node scripts/release.ts prepare --version 0.3.0
  *   node scripts/release.ts publish [--otp <CODE>] [--dry-run] [--no-github]
+ *   node scripts/release.ts publish [--skip-verify]
  *
  * `prepare` refuses to start on a dirty tree. `publish` refuses if anything but
  * `package.json` has changed since, so a release cannot ship half of something
  * else. Both refuse a version that is already on the registry — the check that
  * turns a 403 from the PUT into a sentence before anything slow happens.
+ *
+ * **`publish` verifies the outcome before it tags.** A tag is a claim about npm,
+ * and the registry is eventually consistent: for seconds after a successful
+ * publish the version can still 404. So `publish` waits for the registry to serve
+ * it (60s, polling) and, if it never does, stops *before* the commit and tag — no
+ * claim was made that is not true, and a re-run finishes the job. `--skip-verify`
+ * is only for a machine that cannot read the registry at all.
  *
  * Requires: a logged-in npm session (or an `.npmrc` token), and with 2FA a fresh
  * `--otp`/`$NPM_OTP` for `publish` only.
@@ -35,7 +43,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PACKAGE = "@adaptivemcp/agent";
 const REPO = "adaptivemcp/agent";
-const REGISTRY = "https://registry.npmjs.org";
 const STATE_DIR = join(ROOT, ".release");
 const STATE_FILE = join(STATE_DIR, "state.json");
 
@@ -95,11 +102,68 @@ function nextVersion(current: string, bump: Bump): string {
 }
 
 async function isPublished(version: string): Promise<boolean> {
-  const response = await fetch(`${REGISTRY}/${PACKAGE.replace("/", "%2f")}`);
-  if (response.status === 404) return false;
-  if (!response.ok) fail(`could not read ${PACKAGE} from the registry (HTTP ${response.status})`);
-  const doc = (await response.json()) as { versions?: Record<string, unknown> };
-  return Boolean(doc.versions?.[version]);
+  return (await registryStatus(version)) === "published";
+}
+
+/**
+ * Whether `version` is on the registry — and, when it cannot be read, that we do
+ * not know.
+ *
+ * The two callers want different things from "unknown", which is why this is
+ * three-valued rather than a boolean. `prepare` must not refuse a release just
+ * because the network is down, but a *tag is a claim about npm*: `publish` will
+ * not create one until the registry actually serves the version.
+ *
+ * `npm view --prefer-online` revalidates npm's cached packument, so a version
+ * published a moment ago is seen as soon as the registry offers it; the exact
+ * `@version` form is the reliable existence check (the `versions` list and the
+ * dist-tags lag).
+ */
+async function registryStatus(version: string): Promise<"published" | "missing" | "unknown"> {
+  try {
+    const seen = execFileSync(
+      "npm",
+      ["view", "--prefer-online", `${PACKAGE}@${version}`, "version"],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim();
+    // A version that exists returns it; anything else is not the answer we asked
+    // for, so do not mistake it for one.
+    return seen === version ? "published" : "unknown";
+  } catch (error) {
+    // `npm view` exits non-zero with E404 for a version that does not exist yet;
+    // anything else (offline, auth, a 5xx) means the registry did not answer.
+    const stderr = String((error as { stderr?: string }).stderr ?? "");
+    return /E404/.test(stderr) ? "missing" : "unknown";
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wait until the registry serves `version`, and report whether it did.
+ *
+ * The registry is eventually consistent: for seconds after a successful publish
+ * `npm view` can still 404 (the publish response arrives before the packument is
+ * readable). Tagging on the strength of a single read would therefore claim a
+ * version nobody can fetch — so poll instead, and let the caller decide.
+ */
+async function waitForPublished(
+  version: string,
+  { timeoutMs = 60_000, intervalMs = 3_000 } = {},
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await registryStatus(version)) === "published") return true;
+    if (Date.now() >= deadline) return false;
+    console.log(`[release] ${PACKAGE}@${version} is not visible on the registry yet; waiting…`);
+    await delay(intervalMs);
+  }
 }
 
 /**
@@ -190,7 +254,7 @@ async function prepare(bump: Bump | undefined, explicit: string | undefined, dry
   if (changedFiles().length > 0) {
     fail("the working tree has uncommitted changes; commit or stash them first");
   }
-  if (await isPublished(next)) {
+  if ((await registryStatus(next)) === "published") {
     fail(
       `${PACKAGE}@${next} is already on the registry — choose a later version ` +
         `(package.json currently says ${manifest.version})`,
@@ -230,7 +294,7 @@ async function prepare(bump: Bump | undefined, explicit: string | undefined, dry
   );
 }
 
-async function publish(otp: string | undefined, dryRun: boolean, github: boolean) {
+async function publish(otp: string | undefined, dryRun: boolean, github: boolean, verify: boolean) {
   const state = readState();
   const manifest = readManifest();
   if (manifest.version !== state.version) {
@@ -269,6 +333,18 @@ async function publish(otp: string | undefined, dryRun: boolean, github: boolean
     ]);
   }
 
+  // The tag is a claim about npm, so make the claim true before making it: a
+  // publish that returned success is not yet a version anyone can install. If the
+  // registry never serves it, stop *before* the commit and tag — the tree is
+  // still the prepared tree, and a re-run takes the "already published" branch.
+  if (verify && !(await waitForPublished(state.version))) {
+    fail(
+      `${PACKAGE}@${state.version} was published but is not visible on the registry — ` +
+        "the commit and tag were NOT created; re-run publish once the registry catches " +
+        "up (or pass --skip-verify if the registry cannot be read from here)",
+    );
+  }
+
   const notesFile = join(STATE_DIR, `notes-v${state.version}.md`);
   writeFileSync(notesFile, state.notes);
   run("git", ["add", "package.json"]);
@@ -302,6 +378,9 @@ async function main(): Promise<void> {
   const rest = args.slice(1);
   const dryRun = args.includes("--dry-run");
   const github = !args.includes("--no-github");
+  // Verification is the default; the escape is for a registry this machine cannot
+  // read (an air-gapped or proxied release), not for a hurry.
+  const verify = !args.includes("--skip-verify");
   const otpIndex = args.indexOf("--otp");
   const otp = otpIndex >= 0 ? args[otpIndex + 1] : process.env.NPM_OTP;
   const versionIndex = args.indexOf("--version");
@@ -319,13 +398,13 @@ async function main(): Promise<void> {
   if (mode === "publish") {
     if (bump || explicit)
       fail("`publish` takes no version argument; versions are chosen by `prepare`");
-    await publish(otp, dryRun, github);
+    await publish(otp, dryRun, github, verify);
     return;
   }
   fail(
     "usage:\n" +
       "  node scripts/release.ts prepare patch|minor|major [--dry-run]\n" +
-      "  node scripts/release.ts publish [--otp <CODE>] [--dry-run] [--no-github]",
+      "  node scripts/release.ts publish [--otp <CODE>] [--dry-run] [--no-github] [--skip-verify]",
   );
 }
 
