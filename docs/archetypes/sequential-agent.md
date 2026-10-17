@@ -80,14 +80,15 @@ pipeline, a data-refresh job.
 
 ## Our coverage
 
-| Component                                           | Status | Evidence                                                                                              |
-| --------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| Step model (executable)                             | ❌     | no pipeline definition anywhere in `src/`                                                             |
-| State passing / handoff                             | ❌     | each run is a single conversation                                                                     |
-| Control flow (condition / loop / parallel / router) | ❌     | —                                                                                                     |
-| Checkpoints between steps                           | ❌     | we persist _events_, not resumable step state                                                         |
-| Failure policy per step                             | 🟡     | retry-ish behaviour exists in `@adaptivemcp/orchestration` (tool-call retries), not per pipeline step |
-| Observational graph                                 | ✅     | `AgentRuntime.runTurn` groups a step's calls under `agent_turn_<n>`; `graphView()`, `execution_nodes` |
+| Component                                           | Status | Evidence                                                                                                                                                         |
+| --------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step model (executable)                             | ❌     | no pipeline definition anywhere in `src/`                                                                                                                        |
+| State passing / handoff                             | ❌     | each run is a single conversation                                                                                                                                |
+| Control flow (condition / loop / parallel / router) | ❌     | —                                                                                                                                                                |
+| Checkpoints between steps                           | ❌     | we persist _events_, not resumable step state                                                                                                                    |
+| Failure policy per step                             | 🟡     | retry-ish behaviour exists in `@adaptivemcp/orchestration` (tool-call retries), not per pipeline step                                                            |
+| Observational graph                                 | ✅     | `AgentRuntime.runTurn` groups a step's calls under `agent_turn_<n>`; `graphView()`, `execution_nodes`                                                            |
+| Recorded plan (ordered, re-planned)                 | 🟡     | `PlanStep` (`src/steps.ts`, `--plan-interval`) records an ordered plan and re-plans from `getSteps`; it steers the model rather than being executed step by step |
 
 Two adjacent things we _do_ have, and neither is a pipeline:
 
@@ -98,14 +99,18 @@ Two adjacent things we _do_ have, and neither is a pipeline:
   pattern but cannot re-run it.
 
 That last one is the interesting asymmetry: we can **observe** a sequence
-(the execution graph) and even **recommend** it, but we cannot **define** or
-**replay** one.
+(the execution graph), **recommend** it, and — since #40 — **write down** a plan
+for a run (`PlanStep`, asked for from the recorded state and re-planned on an
+interval). Writing a plan down is not the same as executing one, which is why the
+row above is partial: the plan steers the model, and nothing runs it step by step.
 
 ## Gap
 
 1. **A step/pipeline definition** the host can execute and persist — and, because
    we already record the execution graph, the natural move is to make what we
-   observe _round-trippable_ into a definition (observe → promote → replay).
+   observe _round-trippable_ into a definition (observe → promote → replay). The
+   _observe_ and _record_ halves now exist (`PlanStep`, #40); _promote_ and
+   _replay_ do not.
 2. **Typed state handoff** between steps, so a pipeline does not depend on
    conversation memory.
 3. **Per-step failure policy**, so one bad step does not silently half-apply.
