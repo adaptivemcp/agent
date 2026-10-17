@@ -9,6 +9,7 @@ describe("exit codes", () => {
       Usage: 2,
       Config: 3,
       ApprovalDenied: 4,
+      Paused: 5,
     });
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { AdaptiveRuntime } from "@adaptivemcp/runtime";
 import {
   envelopeClassifier,
@@ -27,12 +28,14 @@ import type {
   ResolvedDecodingSettings,
   RiskLevel,
   Store,
+  Suspension,
   ToolDecoding,
   ToolRecord,
 } from "@adaptivemcp/spec";
 import type {
   AgentDecision,
   AgentExecutor,
+  ChatMessage,
   ChatParams,
   DecisionProvider,
   DecodingProvider,
@@ -110,6 +113,14 @@ export interface AgentRuntimeOptions {
    * flagged for a human.
    */
   requestApproval?: (toolName: string) => boolean | Promise<boolean>;
+  /**
+   * Pause a `require_confirmation` call instead of denying it: the question is
+   * recorded as a suspension and `execute` returns `suspension`, so a
+   * non-interactive host can answer it later (`--resume <id>`). Needs a store that
+   * persists suspensions, which `@adaptivemcp/memory` does; without one the call
+   * falls through to the ordinary denial.
+   */
+  pauseOnApproval?: boolean;
   middleware?: Middleware[];
   sessionId?: string;
   workflowId?: string;
@@ -216,6 +227,10 @@ export class AgentRuntime implements AgentExecutor {
   private approverConfigured: boolean;
   /** Whether this runtime opened the store, and must therefore close it. */
   private readonly ownsStore: boolean;
+  /** Pause, rather than deny, a call that needs confirmation. See the option. */
+  private readonly pauseOnApproval: boolean;
+  /** A resumed call's one-shot answer, armed by `resumeSuspension`. */
+  private resuming?: { toolName: string; approve: boolean };
   private readonly onExecuted?: (observation: ExecutionObservation) => void;
   private readonly warnedSignals = new Set<string>();
   /** Messages for the running turn's next step (see `queueMessage`). */
@@ -231,6 +246,7 @@ export class AgentRuntime implements AgentExecutor {
     this.approver = options.requestApproval ?? (() => false);
     this.approverConfigured = options.requestApproval !== undefined;
     this.ownsStore = options.store === undefined;
+    this.pauseOnApproval = options.pauseOnApproval ?? false;
     this.onExecuted = options.onExecuted;
     this.adaptive = new AdaptiveRuntime({
       store: options.store,
@@ -249,7 +265,7 @@ export class AgentRuntime implements AgentExecutor {
     this.thinClient = new ThinClient({
       memory: this.adaptive.memory,
       gate: this.adaptive.approval,
-      requestApproval: (toolName) => this.approver(toolName),
+      requestApproval: (toolName) => this.approval(toolName),
       middleware: options.middleware ?? [],
       graphTracking: this.graphTracking,
       // Real servers often signal logical failures in-band (a JSON envelope with
@@ -265,6 +281,20 @@ export class AgentRuntime implements AgentExecutor {
     this.approverConfigured = true;
   }
 
+  /**
+   * The effective approval prompt. A call a resume just answered gets its one-shot
+   * decision; otherwise the host's approver decides — and with none configured a
+   * confirmation is denied (fail closed).
+   */
+  private approval(toolName: string): boolean | Promise<boolean> {
+    if (this.resuming?.toolName === toolName) {
+      const { approve } = this.resuming;
+      this.resuming = undefined; // one-shot: a repeat later is a fresh question
+      return approve;
+    }
+    return this.approver(toolName);
+  }
+
   /** Execute one tool call through approval → middleware → retry → telemetry → view. */
   async execute(
     call: ToolCall,
@@ -273,6 +303,27 @@ export class AgentRuntime implements AgentExecutor {
   ): Promise<ToolExecutionResult> {
     const startedAt = Date.now();
     let recorded: McpToolResult = { ok: true };
+
+    // Pause rather than deny: record the question and stop the run, so a
+    // non-interactive host can answer it later (`--resume`). Skipped for the call a
+    // resume just answered, which proceeds through the gate normally. This runs
+    // *before* the client, so a paused call is never recorded as a tool failure —
+    // a suspension is not evidence about the tool.
+    const store = this.adaptive.memory;
+    if (this.pauseOnApproval && store.recordSuspension && this.resuming?.toolName !== spec.name) {
+      const decision = this.adaptive.approval.gate(spec.name, spec.serverName);
+      if (decision === "require_confirmation") {
+        const suspension = this.recordSuspension(spec, call);
+        return {
+          ok: false,
+          error: `paused for approval: ${suspension.id}`,
+          decision,
+          // Blocked, not failed: the same signal the gate's denials carry.
+          executed: false,
+          suspension: { id: suspension.id, question: suspension.question },
+        };
+      }
+    }
 
     const handler: ToolHandler = async (input, context) => {
       // `context` carries middleware-resolved credentials (OAuth); forwards them
@@ -345,6 +396,82 @@ export class AgentRuntime implements AgentExecutor {
    * root, so the turn's calls form one DAG rather than one disconnected root per
    * call. `runAgent` calls this when present.
    */
+  // ---------------------------------------------------------------------------
+  // Pause / resume (ADR-004). The policy is ours; the durable record is the
+  // store's (`Suspension`, in `@adaptivemcp/spec`).
+  // ---------------------------------------------------------------------------
+
+  /** Record a paused run for one tool call and return the suspension. */
+  private recordSuspension(spec: ToolSpec, call: ToolCall): Suspension {
+    const reason = this.approvalReason(spec.name, { serverName: spec.serverName });
+    const suspension: Suspension = {
+      id: `sus-${randomUUID()}`,
+      sessionId: this.sessionId(),
+      kind: "confirmation",
+      question: `approve ${spec.name}?${reason ? ` — ${reason}` : ""}`,
+      responseSchema: { type: "boolean" },
+      resumeState: { toolName: spec.name, serverName: spec.serverName, input: call.input },
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    this.adaptive.memory.recordSuspension?.(suspension);
+    return suspension;
+  }
+
+  /** Paused runs for this session, newest first. */
+  pendingSuspensions(): Suspension[] {
+    return this.adaptive.memory.getSuspensions?.(this.sessionId(), "pending") ?? [];
+  }
+
+  /** Read one suspension by id (any status). */
+  suspension(id: string): Suspension | undefined {
+    return this.adaptive.memory.getSuspension?.(id);
+  }
+
+  /**
+   * Attach the conversation to the newest pending suspension, so a resume
+   * continues that run instead of starting a fresh turn. Call it after `runAgent`
+   * returns `stopReason: "suspended"`.
+   */
+  saveResumeState(messages: ChatMessage[]): Suspension | undefined {
+    const pending = this.pendingSuspensions()[0];
+    const store = this.adaptive.memory;
+    if (!pending || !store.recordSuspension) return undefined;
+    return store.recordSuspension({
+      ...pending,
+      resumeState: { ...pending.resumeState, messages },
+    });
+  }
+
+  /** The conversation a suspension was paused in (`[]` when none was saved). */
+  resumeMessages(suspension: Suspension): ChatMessage[] {
+    const messages = suspension.resumeState?.messages;
+    return Array.isArray(messages) ? (messages as ChatMessage[]) : [];
+  }
+
+  /**
+   * Answer a paused run and arm the one-shot approval for its blocked call.
+   * Returns the resolved suspension, or `undefined` when the id is unknown,
+   * already answered, or was recorded without a tool to resume — a resume may be
+   * replayed, and the first answer wins.
+   */
+  resumeSuspension(id: string, options: { approve: boolean }): Suspension | undefined {
+    const suspension = this.suspension(id);
+    const store = this.adaptive.memory;
+    if (!suspension || suspension.status !== "pending" || !store.resolveSuspension) {
+      return undefined;
+    }
+    const toolName = suspension.resumeState?.toolName;
+    if (typeof toolName !== "string") return undefined;
+    const resolved = store.resolveSuspension(id, {
+      status: options.approve ? "answered" : "cancelled",
+      answer: options.approve ? true : undefined,
+      reason: options.approve ? undefined : "refused on resume",
+    });
+    if (resolved) this.resuming = { toolName, approve: options.approve };
+    return resolved;
+  }
+
   runTurn<T>(label: string, fn: () => Promise<T>): Promise<T> {
     return this.graphTracking.runTurn(label, fn);
   }

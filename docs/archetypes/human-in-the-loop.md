@@ -112,19 +112,19 @@ Most agents (including ours today) have only the first. The second is what makes
 
 ## Our coverage
 
-| Component                                                | Status | Evidence                                                                                |
-| -------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
-| Decision model (3 verdicts)                              | ✅     | `@adaptivemcp/approval` `ApprovalGate.gate()`                                           |
-| Gate at the execution seam                               | ✅     | consulted in `AgentRuntime.execute`                                                     |
-| Interactive approval prompt                              | ✅     | `setRequestApproval` in `src/repl.ts`; `--yes` bypass                                   |
-| Server-governed floor (a server can raise the gate)      | ✅     | `applyServerMetadata`, `serverPolicySummary`                                            |
-| Learned failure rate → require_confirmation              | ✅     | `ApprovalGate` consumes tool failure rate                                               |
-| Audit trail                                              | ✅     | execution events / telemetry                                                            |
-| Approval granularity (normalised action)                 | ❌     | verdicts are per tool call, not per normalised command                                  |
-| **Pause / resume**                                       | 🟡     | the loop pauses and resumes (#45); the host wiring awaits the spec/memory release (#46) |
-| User-input / output-review / iteration-review primitives | ❌     | only yes/no                                                                             |
-| Timeouts & retry policy for an unanswered question       | ❌     | the prompt blocks forever                                                               |
-| Out-of-band approval (answer from another process)       | ❌     | the answer must come from the same terminal                                             |
+| Component                                                | Status | Evidence                                                                                                                                       |
+| -------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision model (3 verdicts)                              | ✅     | `@adaptivemcp/approval` `ApprovalGate.gate()`                                                                                                  |
+| Gate at the execution seam                               | ✅     | consulted in `AgentRuntime.execute`                                                                                                            |
+| Interactive approval prompt                              | ✅     | `setRequestApproval` in `src/repl.ts`; `--yes` bypass                                                                                          |
+| Server-governed floor (a server can raise the gate)      | ✅     | `applyServerMetadata`, `serverPolicySummary`                                                                                                   |
+| Learned failure rate → require_confirmation              | ✅     | `ApprovalGate` consumes tool failure rate                                                                                                      |
+| Audit trail                                              | ✅     | execution events / telemetry                                                                                                                   |
+| Approval granularity (normalised action)                 | ❌     | verdicts are per tool call, not per normalised command                                                                                         |
+| **Pause / resume**                                       | ✅     | `--pause` records a suspension and exits `5`; `--resume <id>` continues the saved conversation, so the blocked call runs — verified end to end |
+| User-input / output-review / iteration-review primitives | ❌     | only yes/no                                                                                                                                    |
+| Timeouts & retry policy for an unanswered question       | ❌     | the prompt blocks forever                                                                                                                      |
+| Out-of-band approval (answer from another process)       | ❌     | the answer must come from the same terminal                                                                                                    |
 
 `src/agent/loop.ts` and `src/types.ts` now carry the primitive
 (`ToolExecutionResult.suspension`, `stopReason: "suspended"`,

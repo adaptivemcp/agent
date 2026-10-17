@@ -280,4 +280,60 @@ describe("cli, end to end and offline", () => {
     expect(offeredTools(childRequest!)).toEqual(["fixture_fixture_echo"]);
     rmSync(skillsDir, { recursive: true, force: true });
   }, 30_000);
+
+  it("pauses a high-risk call, then resumes the run that stopped on it", async () => {
+    // A file-backed store on purpose: a paused run has to outlive the process
+    // that paused it, which is the whole point of the feature.
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-pause-"));
+    const db = join(dir, "agent.db");
+    const session = "cli-e2e-pause";
+    model = new StubModelServer({
+      toolName: "fixture_fixture_deploy",
+      toolInput: { target: "prod" },
+      finalText: "deployed to prod",
+    });
+    const baseUrl = await model.start();
+    const common = [
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      db,
+      "--session",
+      session,
+      "--max-steps",
+      "3",
+    ];
+
+    const paused = await runCli(["--prompt", "deploy to prod", "--pause", ...common]);
+
+    // Exit 5: nothing failed, the run is waiting.
+    expect(paused.code).toBe(5);
+    expect(paused.stdout).toContain("[paused]");
+    const id = /--resume (sus-[0-9a-f-]+)/.exec(paused.stdout)?.[1];
+    expect(id).toBeTruthy();
+
+    // The paused run is listed for the session — and listing needs no MCP server.
+    const listed = await runCli(["--suspensions", "--db", db, "--session", session]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain(id!);
+
+    const resumed = await runCli(["--resume", id!, ...common]);
+
+    expect(resumed.code).toBe(0);
+    expect(resumed.stdout).toContain("[resume]");
+    expect(resumed.stdout).toContain("deployed to prod");
+
+    // Answered once: a replay of the same id is refused rather than re-run.
+    const replay = await runCli(["--resume", id!, ...common]);
+    expect(replay.code).not.toBe(0);
+    expect(replay.stdout + replay.stderr).toContain("no resumable paused run");
+
+    rmSync(dir, { recursive: true, force: true });
+  }, 90_000);
 });
