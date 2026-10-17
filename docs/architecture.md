@@ -91,7 +91,11 @@ pass reads `store.getSteps(session)` rather than the conversation, so a plan
 survives a restart and costs a bounded prompt however long the run got, and a pass
 that cannot plan (the model errors, or answers with nothing usable) is reported
 and skipped — planning never fails a run. A delegated child never plans: the pass
-reads the leader's session, and a child is not the leader.
+reads the leader's session, and a child is not the leader. Because that call is the
+run's own model call made **outside** the loop, the recorded telemetry never sees
+it; `PlanningPassOptions.onCall` reports each one and the CLI aggregates it into the
+run summary (`plans=… plan_tokens=… plan_ms=…`), so planning is visible rather than
+free-looking (#73).
 The runtime's two supporting hooks are `queueMessage`/`drainQueuedMessages` (how a
 background child reports back without the parent polling) and the `store` option
 (how a child shares the parent's memory; a runtime handed a store does not close

@@ -48,7 +48,7 @@ import {
 } from "./skills.js";
 import { tasksPrompt, tasksToolset } from "./tasks.js";
 import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
-import { PlanningPass, formatSteps } from "./steps.js";
+import { PlanningPass, PlanUsage, formatSteps } from "./steps.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -368,12 +368,18 @@ async function main(): Promise<void> {
     // built here, next to the store it uses (the tools read it lazily, and so
     // does this). It never fails a run: a pass that cannot plan is reported and
     // the step proceeds unplanned.
+    //
+    // Its model calls happen outside the loop, so the runtime's cost/telemetry
+    // never sees them; `planUsage` is where they are counted, and the run summary
+    // prints them (#73).
+    const planUsage = new PlanUsage();
     const planner = args.planInterval
       ? new PlanningPass({
           model: defaultModel,
           session: sessionId,
           store: () => activeStore,
           interval: args.planInterval,
+          onCall: (call) => planUsage.record(call),
           onError: (error) => {
             const detail = error instanceof Error ? error.message : String(error);
             console.error(`warning: planning pass skipped (${detail})`);
@@ -575,7 +581,7 @@ async function main(): Promise<void> {
         onEvent: (event) => renderOneShot(event, args.verbose),
       });
       console.log(`
-[agent] stop=${result.stopReason} steps=${result.steps}`);
+[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}`);
       if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
       return;
     }
@@ -601,8 +607,14 @@ async function main(): Promise<void> {
           : undefined,
         metadata: () => runtime.toolsMetadata(),
         graph: () => runtime.graphView(),
-        // The typed history the planning pass reads and writes (steps.ts).
-        steps: () => formatSteps(activeStore?.getSteps?.(sessionId) ?? []),
+        // The typed history the planning pass reads and writes (steps.ts). The
+        // footer is what the planning calls cost: they are the run's own model
+        // calls, so nothing else in the session reports them (#73).
+        steps: () => {
+          const history = formatSteps(activeStore?.getSteps?.(sessionId) ?? []);
+          const usage = planUsage.summary();
+          return usage ? `${history}\nplanning:${usage.trim()}` : history;
+        },
         models: () => catalog.describe(),
         decodingFor: (tool) => {
           const recommendation = runtime.suggestDecoding(tool, runConfig.capabilities, {
@@ -635,7 +647,7 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}`);
+    console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}`);
     if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
     if (denials > 0) {
       console.log(

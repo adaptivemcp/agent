@@ -195,7 +195,11 @@ previous plan) rather than from the conversation, the plan is stored as a
 plan is reported (`warning: planning pass skipped (…)`) and the step proceeds
 unplanned; a delegated child never plans. The loop seam is `steer`
 (`RunAgentOptions.steer`, the pre-step mirror of `review`), and `/steps` renders
-the merged history.
+the merged history. A planning call is the run's **own** model call made _outside_
+the loop, so the Adaptive MCP observation path never sees it — the CLI's run
+summary is where it is accounted for (`plans=… plan_tokens=… plan_ms=…`, via
+`PlanningPassOptions.onCall` → `PlanUsage`), with a `planning:` line on `/steps`
+for the REPL (#73).
 
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +

@@ -140,7 +140,12 @@ history — tasks, actions, plans), `/metadata`, `/cost`,
   reported and the step proceeds unplanned, so planning never fails a run. Because
   the history is typed, one read (`store.getSteps`) returns tasks, actions and plans
   in order, and `/steps` renders exactly that. A delegated child never plans: the
-  pass reads the leader's session.
+  pass reads the leader's session. Because a planning call is the run's own model
+  call and happens **outside** the loop, nothing in the recorded telemetry sees it;
+  the run summary is where its cost is reported instead —
+  `stop=completed steps=4 plans=2 plan_tokens=1234 plan_ms=4100` (`plan_tokens` is
+  omitted when no backend reports usage), and `/steps` ends with a
+  `planning: plans=…` footer.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool
