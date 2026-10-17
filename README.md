@@ -104,7 +104,7 @@ do nothing at all in the REPL.)
   file) is read through the `skills_read_skill` tool when the work calls for it, so a
   large skill library costs almost nothing until it is used. A malformed `SKILL.md`
   is reported and skipped rather than failing the run, and the read tool cannot leave
-  a skill's own directory.
+  a skill's own directory — real paths are resolved, so a symlink out is refused.
 - **Delegation.** `--task` exposes a `task` tool: the model can hand a
   self-contained job to a **sub-agent** that runs in its own session and returns
   only its result — so a broad search or a long review cannot flood the caller's

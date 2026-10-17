@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -110,6 +110,33 @@ describe("skills", () => {
 
       expect(skill?.files).toEqual(["checklist.md", "scripts/run.sh"]);
     });
+
+    it("never lists a symlink, or recurses through one, out of the skill", () => {
+      const dir = makeSkill(root, "deploy", "Deploy");
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      writeFileSync(join(outside, "secret.txt"), "s3cret");
+      symlinkSync(join(outside, "secret.txt"), join(dir, "leak"));
+      symlinkSync(outside, join(dir, "elsewhere"));
+      writeFileSync(join(dir, "real.md"), "- item");
+
+      const [skill] = discoverSkills(dirs(root));
+
+      // The real file is listed; neither link is — not even as a directory to walk.
+      expect(skill?.files).toEqual(["real.md"]);
+    });
+
+    it("skips a skill whose SKILL.md is a symlink out of its directory, with a warning", () => {
+      const borrowed = join(root, "borrowed.md");
+      writeFileSync(borrowed, "---\nname: borrowed\ndescription: someone else's file\n---\nbody");
+      const dir = join(root, "borrowed");
+      mkdirSync(dir);
+      symlinkSync(borrowed, join(dir, SKILL_FILE));
+      const warnings: string[] = [];
+
+      expect(discoverSkills(dirs(root), (message) => warnings.push(message))).toEqual([]);
+      expect(warnings[0]).toContain("not a regular file");
+    });
   });
 
   describe("read_skill", () => {
@@ -165,6 +192,45 @@ describe("skills", () => {
       });
 
       expect(result.ok).toBe(false);
+    });
+
+    it("refuses to read through a symlink that points out of the skill", async () => {
+      // The lexical check the read used to do would pass this: the link *is* inside
+      // the directory by name. Only resolving the real path catches the target.
+      const dir = makeSkill(root, "deploy", "Deploy");
+      writeFileSync(join(root, "secret.txt"), "s3cret");
+      symlinkSync(join(root, "secret.txt"), join(dir, "leak"));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
+
+      const result = await toolset.callTool("read_skill", { skill: "deploy", file: "leak" });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("not a regular file");
+      expect(result.output).toBeUndefined();
+    });
+
+    it("still reads a symlink that stays inside the skill", async () => {
+      const dir = makeSkill(root, "deploy", "Deploy");
+      writeFileSync(join(dir, "notes.md"), "- item");
+      symlinkSync(join(dir, "notes.md"), join(dir, "alias.md"));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
+
+      const result = await toolset.callTool("read_skill", { skill: "deploy", file: "alias.md" });
+
+      expect(result.ok).toBe(true);
+      expect(String(result.output)).toBe("- item");
+    });
+
+    it("refuses a directory as a bundled file", async () => {
+      const dir = makeSkill(root, "deploy", "Deploy");
+      mkdirSync(join(dir, "scripts"));
+      writeFileSync(join(dir, "scripts", "run.sh"), "echo hi");
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
+
+      const result = await toolset.callTool("read_skill", { skill: "deploy", file: "scripts" });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("not a regular file");
     });
 
     it("reports an unknown skill instead of throwing", async () => {

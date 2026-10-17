@@ -12,7 +12,8 @@
  * Skills are **not a protocol concept** (ADR-004): there is no `adaptiveSkill`,
  * no new noun. This is a host-side loader over a filesystem convention, and its
  * files are treated as untrusted input — the read tool cannot escape a skill's
- * own directory.
+ * own directory. That guarantee is `resolveInside`'s: a symlink defeats a string
+ * check, so paths are resolved for real and required to be regular files.
  *
  * Three levels are searched, highest precedence first: the explicit `--skills`
  * directories, the project's `./skills`, then the user-level default. Order *is*
@@ -20,7 +21,7 @@
  * rather than the two merging — and the prompt says which level each one came
  * from, so a name that looks local but is not cannot be mistaken for one.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { load as parseYaml } from "js-yaml";
@@ -152,10 +153,22 @@ export function discoverSkills(
     for (const entry of entries) {
       const dirPath = join(dir, entry);
       const filePath = join(dirPath, SKILL_FILE);
+      let root: string;
       let text: string;
       try {
-        if (!statSync(dirPath).isDirectory()) continue;
-        text = readFileSync(filePath, "utf8");
+        root = realpathSync(dirPath);
+        if (!statSync(root).isDirectory()) continue;
+        const skillFile = resolveInside(root, filePath);
+        if (!skillFile) {
+          // Something is there, but it is not a regular file inside the skill —
+          // a `SKILL.md` symlinked out of the tree, or a device. Refuse it
+          // loudly rather than reading whatever it points at.
+          if (existsSync(filePath)) {
+            warn(`${filePath}: ${SKILL_FILE} is not a regular file inside the skill; skipped`);
+          }
+          continue;
+        }
+        text = readFileSync(skillFile, "utf8");
       } catch {
         continue; // no SKILL.md here — just not a skill
       }
@@ -172,7 +185,6 @@ export function discoverSkills(
         );
         continue;
       }
-      const root = resolve(dirPath);
       found.set(parsed.name, {
         name: parsed.name,
         description: parsed.description,
@@ -248,11 +260,18 @@ export function skillsToolset(skills: Skill[]): Toolset {
 
       if (args.file !== undefined) {
         if (typeof args.file !== "string") return { ok: false, error: "file must be a string" };
-        const target = resolve(skill.dir, args.file);
-        // Untrusted input: a skill may only read inside its own directory, so a
-        // `../` in the argument cannot reach the rest of the filesystem.
-        if (target !== skill.dir && !target.startsWith(skill.dir + sep)) {
+        const lexical = resolve(skill.dir, args.file);
+        if (lexical !== skill.dir && !lexical.startsWith(skill.dir + sep)) {
           return { ok: false, error: `refused: "${args.file}" is outside the skill directory` };
+        }
+        // The lexical check is not enough on its own: a symlink in the skill
+        // directory is inside by string, and the *target* is where it really goes.
+        const target = resolveInside(skill.dir, lexical);
+        if (!target) {
+          return {
+            ok: false,
+            error: `refused: "${args.file}" is not a regular file inside the skill directory`,
+          };
         }
         try {
           return { ok: true, output: bounded(readFileSync(target, "utf8")) };
@@ -262,8 +281,10 @@ export function skillsToolset(skills: Skill[]): Toolset {
       }
 
       let body: string;
+      const skillFile = resolveInside(skill.dir, join(skill.dir, SKILL_FILE));
+      if (!skillFile) return { ok: false, error: `cannot read ${skill.name}/${SKILL_FILE}` };
       try {
-        const parsed = parseSkill(readFileSync(join(skill.dir, SKILL_FILE), "utf8"));
+        const parsed = parseSkill(readFileSync(skillFile, "utf8"));
         if (!parsed) return { ok: false, error: `"${skill.name}" no longer loads` };
         body = parsed.body;
       } catch {
@@ -279,6 +300,35 @@ export function skillsToolset(skills: Skill[]): Toolset {
       // Nothing to release.
     },
   };
+}
+
+/**
+ * The real path of `path` when it is a **regular file inside** `root`, else
+ * `undefined`.
+ *
+ * `resolve` alone is not confinement: it is purely lexical, so a symlink sitting
+ * in a skill directory passes a string-prefix check and `readFileSync` follows it
+ * straight out of the tree — which is exactly how a copied or vendored skill (the
+ * untrusted case) would read a key or `/etc/passwd`. Resolving for real *and*
+ * requiring a regular file is what makes "cannot leave the skill's own directory"
+ * true rather than aspirational.
+ */
+function resolveInside(root: string, path: string): string | undefined {
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    return undefined;
+  }
+  if (real !== root && !real.startsWith(root + sep)) return undefined;
+  try {
+    // A directory, socket, fifo or device is not a bundled file; reading one
+    // either fails or hangs.
+    if (!statSync(real).isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  return real;
 }
 
 /** Split a `SKILL.md` into its frontmatter and body, or `undefined` if malformed. */
@@ -338,11 +388,13 @@ function readNameList(value: unknown): string[] | undefined | null {
  */
 export function agentDefinition(skill: Skill): AgentDefinition {
   let instructions = "";
-  try {
-    const parsed = parseSkill(readFileSync(join(skill.dir, SKILL_FILE), "utf8"));
-    instructions = parsed?.body ?? "";
-  } catch {
-    // A skill that vanished between discovery and use simply has no instructions.
+  const skillFile = resolveInside(skill.dir, join(skill.dir, SKILL_FILE));
+  if (skillFile) {
+    try {
+      instructions = parseSkill(readFileSync(skillFile, "utf8"))?.body ?? "";
+    } catch {
+      // A skill that vanished between discovery and use simply has no instructions.
+    }
   }
   return {
     name: skill.name,
@@ -367,14 +419,17 @@ function listSkillFiles(dir: string, prefix = "", depth = 0): string[] {
     if (files.length >= MAX_FILES) break;
     const path = join(dir, entry);
     const relative = prefix ? `${prefix}/${entry}` : entry;
-    let isDirectory = false;
+    let info: ReturnType<typeof lstatSync>;
     try {
-      isDirectory = statSync(path).isDirectory();
+      // `lstat`, never `stat`: following a link here would both list files from
+      // outside the skill and recurse into a directory it points at.
+      info = lstatSync(path);
     } catch {
       continue;
     }
-    if (isDirectory) files.push(...listSkillFiles(path, relative, depth + 1));
-    else if (relative !== SKILL_FILE) files.push(relative);
+    if (info.isSymbolicLink()) continue; // a link is how a bundled file escapes
+    if (info.isDirectory()) files.push(...listSkillFiles(path, relative, depth + 1));
+    else if (info.isFile() && relative !== SKILL_FILE) files.push(relative);
   }
   return files.slice(0, MAX_FILES);
 }
