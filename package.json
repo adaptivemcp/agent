@@ -30,8 +30,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "release": "node scripts/release.ts",
-    "release:dry": "node scripts/release.ts --dry-run",
+    "release:prepare": "node scripts/release.ts prepare",
+    "release:publish": "node scripts/release.ts publish",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
