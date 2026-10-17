@@ -613,7 +613,7 @@ async function main(): Promise<void> {
         steps: () => {
           const history = formatSteps(activeStore?.getSteps?.(sessionId) ?? []);
           const usage = planUsage.summary();
-          return usage ? `${history}\nplanning:${usage.trim()}` : history;
+          return usage ? `${history}\nplanning:${usage}` : history;
         },
         models: () => catalog.describe(),
         decodingFor: (tool) => {

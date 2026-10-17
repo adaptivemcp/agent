@@ -1,16 +1,9 @@
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { runAgent } from "./agent/loop.js";
+import type { RunAgentOptions } from "./agent/loop.js";
 import { createReplRenderer, makeColor, preview } from "./render.js";
-import type {
-  AgentExecutor,
-  ChatMessage,
-  ChatModel,
-  DecisionProvider,
-  DecodingProvider,
-  ModelSelector,
-  ToolSpec,
-} from "./types.js";
+import type { AgentExecutor, ChatMessage } from "./types.js";
 
 /** The runtime hooks the REPL uses for human-in-the-loop approvals. */
 export interface ApprovalHost {
@@ -18,17 +11,21 @@ export interface ApprovalHost {
   approvalReason?(toolName: string): string | undefined;
 }
 
-export interface ReplOptions {
-  model: ChatModel;
-  tools: ToolSpec[];
+/**
+ * A REPL is a *host*: it runs the same loop as a one-shot turn, so it takes the
+ * loop's options rather than re-listing the useful ones.
+ *
+ * That is deliberate. A hand-picked list silently dropped `steer` (so
+ * `--plan-interval` did nothing in the REPL) and `stopGuard` (so `--mode tasks`
+ * could end a turn with its list unfinished) — the same class of bug as a mode
+ * whose tools were wired but whose runner was not. Inheriting the loop's options
+ * means a new seam is forwarded by default, and omitting one has to be written
+ * down here.
+ */
+export interface ReplOptions extends Omit<RunAgentOptions, "messages" | "onEvent" | "executor"> {
   executor: AgentExecutor & Partial<ApprovalHost>;
-  decoding?: DecodingProvider;
-  selectModel?: ModelSelector;
-  /** Fast System-1 decision layer (e.g. `AgentRuntime.systemOneProvider`). */
-  decide?: DecisionProvider;
+  /** System prompt for the turn (the REPL keeps the conversation across turns). */
   system?: string;
-  maxSteps?: number;
-  stream?: boolean;
   /** Prompt y/n when the gate returns require_confirmation (default true). */
   approvals?: boolean;
   /** Learned context injected into the system message each turn. */
@@ -249,18 +246,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
       reset();
       prompt(color.dim("agent> "));
       try {
-        const result = await runAgent({
-          model: options.model,
-          tools: options.tools,
-          executor: options.executor,
-          messages: next,
-          maxSteps: options.maxSteps,
-          decoding: options.decoding,
-          selectModel: options.selectModel,
-          decide: options.decide,
-          stream: options.stream,
-          onEvent: render,
-        });
+        // Every run seam is forwarded, not re-listed: a hand-picked list is how
+        // `steer` and `stopGuard` went missing here (see `ReplOptions`).
+        const result = await runAgent({ ...options, messages: next, onEvent: render });
         messages = result.messages;
         ensureNewline();
         persistHistory();
