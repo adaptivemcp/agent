@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -717,6 +717,138 @@ describe("cli, end to end and offline", () => {
     expect(system?.content).toContain("commit-style: Write commit messages this way");
 
     rmSync(configHome, { recursive: true, force: true });
+  }, 30_000);
+
+  it("lists skills, with their level and hash, and needs no MCP server", async () => {
+    const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-"));
+    const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-src-"));
+    mkdirSync(join(skillsDir, "deploy"), { recursive: true });
+    writeFileSync(
+      join(skillsDir, "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Ship it\n---\n\nGo.\n",
+    );
+
+    // No --server and no model: inspecting skills is a host act, not a run.
+    const run = await runCli(["--skills-list", "--skills", skillsDir], {
+      XDG_CONFIG_HOME: configHome,
+    });
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("deploy");
+    expect(run.stdout).toContain("trusted");
+    expect(run.stdout).toMatch(/sha256:[0-9a-f]{64}/);
+
+    rmSync(configHome, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("withholds a skill from a directory marked untrusted, and says why", async () => {
+    const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-trust-config-"));
+    const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-trust-src-"));
+    mkdirSync(join(skillsDir, "sketchy"), { recursive: true });
+    writeFileSync(
+      join(skillsDir, "sketchy", "SKILL.md"),
+      "---\nname: sketchy\ndescription: From somewhere else\n---\n\nTrust me.\n",
+    );
+    model = new StubModelServer({ respond: () => ({ text: "done" }) });
+    const baseUrl = await model.start();
+
+    const run = await runCli(
+      [
+        "--prompt",
+        "say hi",
+        "--skills",
+        skillsDir,
+        "--skills-untrusted",
+        skillsDir,
+        "--server",
+        serverSpec(),
+        "--base-url",
+        baseUrl,
+        "--api-key",
+        "test-key",
+        "--no-ollama",
+        "--no-stream",
+        "--db",
+        ":memory:",
+        "--session",
+        "cli-e2e-skill-trust",
+        "--max-steps",
+        "1",
+      ],
+      { XDG_CONFIG_HOME: configHome },
+    );
+
+    expect(run.code).toBe(0);
+    // Not in the prompt listing — the listing is itself a foothold — and not offered.
+    const system = model.requests[0]?.messages.find((message) => message.role === "system");
+    expect(system?.content ?? "").not.toContain("sketchy");
+    expect(offeredTools(model.requests[0]!)).not.toContain("skills_read_skill");
+    // The operator is told what was withheld, and how to vouch for it.
+    expect(run.stderr).toContain("withheld as untrusted");
+    expect(run.stderr).toContain("sketchy");
+
+    rmSync(configHome, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("vouches for a skill by hash, so a marked directory becomes usable", async () => {
+    const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-vouch-config-"));
+    const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-vouch-src-"));
+    mkdirSync(join(skillsDir, "review"), { recursive: true });
+    writeFileSync(
+      join(skillsDir, "review", "SKILL.md"),
+      "---\nname: review\ndescription: Review a diff\n---\n\nRead it, then report.\n",
+    );
+    const env = { XDG_CONFIG_HOME: configHome };
+
+    // Vouching is a config act of its own: it records the hash and exits.
+    const vouched = await runCli(["--skills", skillsDir, "--skills-trust", "review"], env);
+    expect(vouched.code).toBe(0);
+    expect(vouched.stdout).toContain("vouched for review");
+    const record = JSON.parse(
+      readFileSync(join(configHome, "agent", "skills.trust.json"), "utf8"),
+    ) as { entries: Array<{ name: string; hash: string }> };
+    expect(record.entries[0]?.name).toBe("review");
+    expect(record.entries[0]?.hash).toMatch(/^sha256:/);
+
+    // Now the same directory, marked untrusted, still offers the skill it vouched for.
+    model = new StubModelServer({ respond: () => ({ text: "done" }) });
+    const baseUrl = await model.start();
+    const run = await runCli(
+      [
+        "--prompt",
+        "review it",
+        "--skills",
+        skillsDir,
+        "--skills-untrusted",
+        skillsDir,
+        "--server",
+        serverSpec(),
+        "--base-url",
+        baseUrl,
+        "--api-key",
+        "test-key",
+        "--no-ollama",
+        "--no-stream",
+        "--db",
+        ":memory:",
+        "--session",
+        "cli-e2e-skill-vouch",
+        "--max-steps",
+        "1",
+      ],
+      env,
+    );
+
+    expect(run.code).toBe(0);
+    const system = model.requests[0]?.messages.find((message) => message.role === "system");
+    expect(system?.content).toContain("review: Review a diff");
+    expect(offeredTools(model.requests[0]!)).toContain("skills_read_skill");
+    expect(run.stderr).not.toContain("withheld");
+
+    rmSync(configHome, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
   }, 30_000);
 
   it("pauses a high-risk call, then resumes the run that stopped on it", async () => {

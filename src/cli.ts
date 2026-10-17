@@ -46,6 +46,15 @@ import {
   skillsToolset,
   type AgentDefinition,
 } from "./skills.js";
+import {
+  addTrustEntry,
+  decideTrust,
+  readTrust,
+  skillHash,
+  trustFilePath,
+  writeTrust,
+  type TrustRecord,
+} from "./skill-trust.js";
 import { tasksPrompt, tasksToolset } from "./tasks.js";
 import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
 import { PlanningPass, PlanUsage, formatSteps } from "./steps.js";
@@ -131,6 +140,58 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Inspecting and vouching for skills are host config acts, so they need no MCP
+  // server and no model: discover, report, write the record, and stop.
+  if (args.skillsList || args.skillsTrust.length > 0) {
+    const discovered = discoverSkills(skillDirs(args.skills), (message) =>
+      console.warn(`[skills] ${message}`),
+    );
+    const trustFile = trustFilePath();
+    let record = loadTrustRecord(trustFile);
+    if (!record) return;
+
+    if (args.skillsTrust.length > 0) {
+      for (const name of args.skillsTrust) {
+        const skill = discovered.find((candidate) => candidate.name === name);
+        const hash = skill ? skillHash(skill) : undefined;
+        if (!hash) {
+          console.error(`error: --skills-trust: no readable skill named "${name}"`);
+          process.exitCode = ExitCode.Usage;
+          return;
+        }
+        record = addTrustEntry(record, {
+          name,
+          hash,
+          status: "trusted",
+          note: "vouched for on the command line",
+          at: new Date().toISOString(),
+        });
+      }
+      writeTrust(record, trustFile);
+      console.log(
+        `[skills] vouched for ${args.skillsTrust.join(", ")} — recorded in ${trustFile}`,
+      );
+      if (!args.skillsList) return;
+    }
+
+    if (discovered.length === 0) console.log("[skills] none discovered");
+    const withheld = new Map(
+      decideTrust(discovered, { untrustedDirs: args.skillsUntrusted, record }).withheld.map(
+        ({ skill, reason }) => [skill, reason],
+      ),
+    );
+    for (const skill of discovered) {
+      const status = withheld.has(skill) ? "untrusted" : "trusted";
+      const reason = withheld.get(skill);
+      console.log(
+        [status, skill.origin, skill.name, skillHash(skill) ?? "unreadable", reason]
+          .filter((field) => field !== undefined)
+          .join("\t"),
+      );
+    }
+    return;
+  }
+
   const fallbackServer = exampleServerOptions();
   const serverSpecs: ServerSpec[] =
     args.servers.length > 0
@@ -211,9 +272,24 @@ async function main(): Promise<void> {
   // Skills are host-owned instructions exposed as an ordinary toolset, so
   // reading one takes the same path as any MCP tool (gate, telemetry, graph).
   // Only names and descriptions reach the prompt; the body is fetched on demand.
-  const skills = discoverSkills(skillDirs(args.skills), (message) => {
+  // Trust decides which skills are offered at all: a withheld skill is neither
+  // listed (the listing is itself a foothold — names and descriptions steer the
+  // model) nor readable, so unvetted text never enters the context window.
+  const discovered = discoverSkills(skillDirs(args.skills), (message) => {
     if (args.verbose) console.warn(`[skills] ${message}`);
   });
+  const trustRecord = loadTrustRecord(trustFilePath());
+  if (!trustRecord) return;
+  const { trusted: skills, withheld } = decideTrust(discovered, {
+    untrustedDirs: args.skillsUntrusted,
+    record: trustRecord,
+  });
+  if (withheld.length > 0) {
+    console.error(
+      `[skills] ${withheld.length} withheld as untrusted: ` +
+        withheld.map(({ skill, reason }) => `${skill.name} (${reason})`).join("; "),
+    );
+  }
   const sessionId = args.session ?? `cli-${Date.now()}`;
   // Delegation is wired lazily: the toolset joins the aggregate now (so `task` is
   // in the tool list the model sees), while its dependencies — the parent
@@ -671,6 +747,17 @@ async function main(): Promise<void> {
     closeRuntime();
     drainNotifications();
     await headroom?.close();
+  }
+}
+
+/** Read the trust record, reporting a malformed one as a config error. */
+function loadTrustRecord(path: string): TrustRecord | undefined {
+  try {
+    return readTrust(path);
+  } catch (error) {
+    console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = ExitCode.Config;
+    return undefined;
   }
 }
 

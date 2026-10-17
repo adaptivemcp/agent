@@ -46,6 +46,15 @@ export interface CliArgs {
    * `./skills` is added automatically when it exists.
    */
   skills: string[];
+  /**
+   * Skill directories whose skills are untrusted: not listed in the prompt and
+   * not readable until vouched for by name or by a scan verdict.
+   */
+  skillsUntrusted: string[];
+  /** Skill names to vouch for (records their hash in the trust file), then exit. */
+  skillsTrust: string[];
+  /** Print the discovered skills with their trust status, then exit. */
+  skillsList: boolean;
   /** Local fallback risk for tools whose server ships no MCP annotations. */
   defaultRisk: "low" | "medium" | "high" | "none";
   /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
@@ -138,6 +147,9 @@ export function parseTierList(raw: string, source: string): System1Tier[] {
 const DEFAULT_ARGS: CliArgs = {
   servers: [],
   skills: [],
+  skillsUntrusted: [],
+  skillsTrust: [],
+  skillsList: false,
   listTools: false,
   interactive: false,
   defaultRisk: "medium",
@@ -217,6 +229,15 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         break;
       case "--skills":
         (args.skills ??= []).push(next());
+        break;
+      case "--skills-untrusted":
+        (args.skillsUntrusted ??= []).push(next());
+        break;
+      case "--skills-trust":
+        (args.skillsTrust ??= []).push(next());
+        break;
+      case "--skills-list":
+        args.skillsList = true;
         break;
       case "--default-risk": {
         const value = next();
@@ -482,6 +503,12 @@ Options:
                                 ./skills and $XDG_CONFIG_HOME/agent/skills are searched
                                 too, a project skill winning over a user one. Only names
                                 and descriptions enter the prompt; bodies load on demand
+  --skills-untrusted <dir>      Treat the skills under <dir> as untrusted: not listed in
+                                the prompt and not readable, until vouched for (repeatable)
+  --skills-trust <name>         Vouch for a skill by recording its content hash in
+                                $XDG_CONFIG_HOME/agent/skills.trust.json, then exit
+  --skills-list                 Print the discovered skills, their level, hash and trust
+                                status, then exit (needs no MCP server)
   --prompt <text>               One-shot prompt instead of the interactive REPL
   -i, --interactive             Force the interactive REPL
   --model <id>                  Pin one catalog model (disables adaptive selection)
