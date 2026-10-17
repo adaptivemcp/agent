@@ -479,7 +479,10 @@ async function main(): Promise<void> {
     // The child runner. A child is a full sub-agent: own session, own
     // conversation, and only its final answer goes back. It shares the parent's
     // store, so its calls land in the same graph and learned state.
-    if (args.task) {
+    // `implied` matters here as much as it does for the tool list: a mode that
+    // implies `task` must wire the runner too, or the tool it exposed can only
+    // fail ("delegation is not wired yet").
+    if (args.task || implied.task) {
       runChild = async (
         task: SubagentTask,
         childSession: string,

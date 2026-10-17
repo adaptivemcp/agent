@@ -272,6 +272,54 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout.indexOf("[delegated]")).toBeGreaterThan(run.stdout.indexOf("stop=completed"));
   }, 30_000);
 
+  it("wires the child runner for a mode that implies delegation", async () => {
+    // `--mode route` implies `--task`, so the tool list has `delegate_task`. The
+    // runner behind it has to be wired from the same decision, or the tool the
+    // mode exposed can only answer "delegation is not wired yet".
+    model = new StubModelServer({
+      respond: (request) => {
+        const isChild = request.messages.some(
+          (message) => message.role === "system" && (message.content ?? "").includes("sub-agent"),
+        );
+        if (isChild) return { text: "the specialist answered" };
+        const answered = request.messages.some((message) => message.role === "tool");
+        return answered
+          ? { text: "routed" }
+          : {
+              toolName: "delegate_task",
+              toolInput: { description: "route it", prompt: "answer this" },
+            };
+      },
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "who should answer this?",
+      "--mode",
+      "route",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-mode-route",
+      "--max-steps",
+      "3",
+    ]);
+
+    expect(run.code).toBe(0);
+    // The child really ran: its answer is in the parent's history.
+    expect(run.stdout).toContain("the specialist answered");
+    expect(run.stdout).not.toContain("delegation is not wired yet");
+  }, 30_000);
+
   it("denies a high-risk tool with no approver, and says so instead of running it", async () => {
     model = new StubModelServer({
       toolName: "fixture_fixture_deploy",
