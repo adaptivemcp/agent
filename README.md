@@ -118,6 +118,16 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   so `--db` makes it outlive the run and a resumed run reads the same plan; it is
   the shared state that makes multi-step orchestration legible
   (`docs/archetypes/orchestrator-agent.md`).
+- **Orchestration modes.** `--mode <name>` names the coordination pattern instead
+  of leaving it to the model, and implies the tools it needs. `coordinate` (a
+  supervisor: delegate the independent parts, then synthesise one answer), `route`
+  (one specialist answers, and its answer stands — no re-writing), `broadcast` (the
+  same request to every member, reported separately), `tasks` (plan in the shared
+  list and finish it — delegation plus the task list). Each mode contributes a
+  paragraph to the system prompt; `tasks` goes further and installs a **stop
+  guard**, so a run does not end while the list still holds a task that is neither
+  completed, failed nor cancelled: the model is shown what is left and takes
+  another step (`⚠` in the output), rather than the mode hoping it keeps going.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool

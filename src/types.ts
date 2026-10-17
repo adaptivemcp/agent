@@ -205,6 +205,20 @@ export interface AgentExecutor {
   review?(context: { step: number }): string | undefined | Promise<string | undefined>;
 }
 
+/**
+ * A guard consulted when the model **stops calling tools**, just before the loop
+ * reports the run `completed`. Return a message to keep going — it is appended as
+ * a user turn and the loop takes another step — or `undefined` to accept the stop.
+ *
+ * This is how a host enforces its own idea of "done": the `tasks` orchestration
+ * mode refuses to finish while the shared task list still has open work, instead
+ * of asking the model nicely to keep going.
+ */
+export type StopGuard = (context: {
+  step: number;
+  messages: ChatMessage[];
+}) => string | undefined | Promise<string | undefined>;
+
 export interface AgentRunResult {
   messages: ChatMessage[];
   steps: number;

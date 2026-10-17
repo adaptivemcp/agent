@@ -95,6 +95,11 @@ export function renderOneShot(
         event.result.ok ? `✓ ${stringify(event.result.output)}\n` : `✗ ${event.result.error}\n`,
       );
       break;
+    case "guard":
+      // Why a step was injected: a graph guardrail, or a mode refusing to let the
+      // run stop. A scripted run has to be able to see that, so it is never silent.
+      sink.write(`⚠ ${event.message}\n`);
+      break;
   }
 }
 

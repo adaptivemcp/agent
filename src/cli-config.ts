@@ -10,6 +10,7 @@ import type {
   DecisionProvider,
   DecodingProvider,
   ModelSelector,
+  StopGuard,
   ToolSpec,
 } from "./types.js";
 
@@ -32,6 +33,11 @@ export interface RunConfig {
   selectModel?: ModelSelector;
   decide?: DecisionProvider;
   stream: boolean;
+  /**
+   * Optional guard consulted when the model wants to stop (the `tasks`
+   * orchestration mode uses it to finish a plan before the run ends).
+   */
+  stopGuard?: StopGuard;
 }
 
 export interface RunConfigInput {
@@ -51,6 +57,8 @@ export interface RunConfigInput {
    * failover chain). Omit to disable the decision layer.
    */
   system1?: System1Selection;
+  /** Stop guard for the run's orchestration mode (see `RunConfig.stopGuard`). */
+  stopGuard?: StopGuard;
 }
 
 /** Assemble the shared run inputs once, for any renderer to consume. */
@@ -74,5 +82,6 @@ export function buildRunConfig(input: RunConfigInput): RunConfig {
       ? runtime.systemOneProvider(catalog, { model: args.system1Model, ...system1 })
       : undefined,
     stream: !args.noStream,
+    stopGuard: input.stopGuard,
   };
 }

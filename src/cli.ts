@@ -47,6 +47,7 @@ import {
   type AgentDefinition,
 } from "./skills.js";
 import { tasksPrompt, tasksToolset } from "./tasks.js";
+import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -230,9 +231,12 @@ async function main(): Promise<void> {
   // The task list lives in the store, and the runtime owns the store; the runtime
   // is built inside the run below, so the toolset reads this at call time.
   let activeStore: Store | undefined;
+  // A named mode is a policy for the whole run: it implies the tools it needs
+  // (below) and contributes its paragraph to the system prompt.
+  const implied = args.mode ? modeTools(args.mode) : { task: false, tasks: false };
   const toolsetList: Toolset[] = [...toolsets];
   if (skills.length > 0) toolsetList.push(skillsToolset(skills));
-  if (args.tasks) {
+  if (args.tasks || implied.tasks) {
     toolsetList.push(
       tasksToolset({
         session: sessionId,
@@ -240,7 +244,7 @@ async function main(): Promise<void> {
       }),
     );
   }
-  if (args.task) {
+  if (args.task || implied.task) {
     toolsetList.push(
       taskToolset({
         session: sessionId,
@@ -401,9 +405,11 @@ async function main(): Promise<void> {
     // their bodies only when the model asks for one.
     const systemWithServers = [
       baseSystem,
+      // The mode's paragraph comes first: it says what the *shape* of the work is.
+      args.mode ? modePrompt(args.mode) : "",
       serverBlock,
       skillsPrompt(skills),
-      args.tasks ? tasksPrompt() : "",
+      args.tasks || implied.tasks ? tasksPrompt() : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -457,6 +463,11 @@ async function main(): Promise<void> {
       catalog,
       system: systemWithServers,
       system1: system1Enabled ? system1Selection : undefined,
+      // `tasks` mode does not let the run end while its list is open (see modes.ts).
+      stopGuard:
+        args.mode === "tasks"
+          ? tasksStopGuard({ session: sessionId, store: () => activeStore })
+          : undefined,
     });
 
     // `--yes` is the only way to auto-approve in a non-interactive run; without
@@ -490,6 +501,9 @@ async function main(): Promise<void> {
           const result = await runAgent({
             ...runConfig,
             executor: child,
+            // A child is not the leader: the parent's board must not decide when a
+            // child may stop (and the child is not given the tasks tools anyway).
+            stopGuard: undefined,
             // What this child may use: the parent's tools, narrowed by its
             // definition (never widened by it).
             tools: context.tools,

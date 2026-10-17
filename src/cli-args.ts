@@ -11,6 +11,7 @@ import {
   localSystemOneBackend,
   type DecisionBackend,
 } from "./decision/systemone.js";
+import { ORCHESTRATION_MODES, isOrchestrationMode, type OrchestrationMode } from "./modes.js";
 
 /** A System One decision tier selectable via `--system1-backend`. */
 export type System1Tier = "ollama" | "openai";
@@ -81,6 +82,13 @@ export interface CliArgs {
    * `--db` is what makes it outlive the run.
    */
   tasks: boolean;
+  /**
+   * Name the coordination pattern instead of leaving it to the model:
+   * `coordinate` (delegate, then synthesise), `route` (one specialist answers),
+   * `broadcast` (the same request to every member), or `tasks` (plan in the
+   * shared list and finish it). A mode implies the tools it needs.
+   */
+  mode?: OrchestrationMode;
   /**
    * Pause instead of denying when a tool needs confirmation in a non-interactive
    * run, so a human can answer it later (`--resume`). Needs `--db`; exits `5`.
@@ -277,6 +285,14 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
       case "--tasks":
         args.tasks = true;
         break;
+      case "--mode": {
+        const value = next();
+        if (!isOrchestrationMode(value)) {
+          throw new Error(`--mode expects ${ORCHESTRATION_MODES.join("|")}, got "${value}"`);
+        }
+        args.mode = value;
+        break;
+      }
       case "--pause":
         args.pause = true;
         break;
@@ -468,6 +484,8 @@ Options:
                                 its own session and returns only its result
   --tasks                       Keep a shared task list (tasks_* tools) in the run's store;
                                 add --db to keep it across runs
+  --mode <name>                 Name the coordination pattern (implies the tools it
+                                needs): coordinate|route|broadcast|tasks
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming

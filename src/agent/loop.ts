@@ -11,6 +11,7 @@ import type {
   DecodingProvider,
   ExecutionContext,
   ModelSelector,
+  StopGuard,
   ToolCall,
   ToolSpec,
 } from "../types.js";
@@ -45,6 +46,11 @@ export interface RunAgentOptions {
    * `model.stream` exists). Streamed chunks arrive as `text_delta` events.
    */
   stream?: boolean;
+  /**
+   * Optional guard consulted when the model stops calling tools, before the run
+   * is reported `completed`: return a message to keep going (see `StopGuard`).
+   */
+  stopGuard?: StopGuard;
   onEvent?: AgentEventListener;
 }
 
@@ -211,6 +217,14 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
 
     if (chat.toolCalls.length === 0) {
       if (chat.text) messages.push({ role: "assistant", content: chat.text });
+      // The model thinks it is done. A host may disagree: `stopGuard` is how a
+      // mode keeps the run going while its own board still holds open work.
+      const keepGoing = await options.stopGuard?.({ step, messages });
+      if (keepGoing) {
+        emit({ type: "guard", message: keepGoing, step });
+        messages.push({ role: "user", content: keepGoing });
+        continue;
+      }
       return { messages, steps: step + 1, stopReason: "completed" };
     }
 

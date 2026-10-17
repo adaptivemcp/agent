@@ -81,6 +81,13 @@ describe("loadAgentConfig", () => {
   it("rejects a non-mapping document", () => {
     expect(() => loadAgentConfig(write("list.yaml", "- a\n- b"))).toThrow(/must be a mapping/);
   });
+
+  it("reads a named orchestration mode, and rejects an unknown one", () => {
+    expect(loadAgentConfig(write("mode.yaml", "mode: route")).mode).toBe("route");
+    expect(() => loadAgentConfig(write("mode-bad.yaml", "mode: supervisor"))).toThrow(
+      /coordinate\|route\|broadcast\|tasks/,
+    );
+  });
 });
 
 describe("resolveArgs layering", () => {
