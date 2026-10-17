@@ -170,9 +170,15 @@ class ScriptedBackend {
   readonly id = "scripted";
   readonly model = "gpt-4o-mini";
   calls = 0;
+
+  constructor(
+    private readonly answers: SystemOneResponse["answers"] = {},
+    private readonly usage = { input_tokens: 0, output_tokens: 0 },
+  ) {}
+
   async answer(): Promise<SystemOneResponse> {
     this.calls += 1;
-    return { model: this.model, answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
+    return { model: this.model, answers: this.answers, usage: this.usage };
   }
 }
 
@@ -209,5 +215,47 @@ describe("AgentRuntime.systemOneProvider backend injection", () => {
     });
 
     expect(backend.calls).toBe(1);
+  });
+
+  it("accounts for the decision layer's own calls, which no tool telemetry sees", async () => {
+    // The remote tier is a real, billed completion, made outside the tool loop:
+    // the run summary and `/decision` are the only places it can show up (#73's
+    // twin — the planning pass is the other one).
+    const runtime = new AgentRuntime({
+      dbPath: ":memory:",
+      sessionId: "accounting",
+      invoke: async () => ({ ok: false, error: "unused in this test" }),
+    });
+    const ask = { step: 0, messages: [{ role: "user" as const, content: "deploy" }], tools: [] };
+
+    // A run whose decision layer never ran prints exactly what it printed before.
+    expect(runtime.decisionCallSummary()).toBe("");
+
+    // A backend that reports no usage still contributes a call and its latency;
+    // `decision_tokens=0` would read as "free", which is not what happened.
+    const silent = runtime.systemOneProvider(CATALOG, { backend: new ScriptedBackend() });
+    await silent(ask);
+    expect(runtime.decisionCallSummary()).toMatch(/^ decisions=1 decision_ms=\d+$/);
+
+    // A confident verdict with reported tokens: counted, and shown with it.
+    const answering = runtime.systemOneProvider(CATALOG, {
+      backend: new ScriptedBackend(
+        {
+          decoding: {
+            type: "choice",
+            choice: "deterministic",
+            probabilities: { deterministic: 0.8, balanced: 0.1, creative: 0.1 },
+            confidence: 0.8,
+          },
+        },
+        { input_tokens: 40, output_tokens: 12 },
+      ),
+    });
+    await answering({ ...ask, step: 1 });
+
+    expect(runtime.decisionCallSummary()).toMatch(
+      /^ decisions=2 decision_tokens=52 decision_ms=\d+$/,
+    );
+    expect(runtime.lastDecisionSummary()).toContain("this run: decisions=2 decision_tokens=52");
   });
 });

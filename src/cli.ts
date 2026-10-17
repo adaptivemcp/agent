@@ -581,7 +581,7 @@ async function main(): Promise<void> {
         onEvent: (event) => renderOneShot(event, args.verbose),
       });
       console.log(`
-[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}`);
+[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}${runtime.decisionCallSummary()}`);
       if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
       return;
     }
@@ -647,7 +647,9 @@ async function main(): Promise<void> {
       },
     });
 
-    console.log(`\n[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}`);
+    console.log(
+      `\n[agent] stop=${result.stopReason} steps=${result.steps}${planUsage.summary()}${runtime.decisionCallSummary()}`,
+    );
     if (result.stopReason === "suspended") reportPaused(runtime, result.messages);
     if (denials > 0) {
       console.log(

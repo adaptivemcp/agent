@@ -154,6 +154,14 @@ do nothing at all in the REPL.)
   `planning: plans=…` footer.
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
+- **Cost of the run's own model calls.** Planning passes and System One decisions
+  are the run's **own** model calls, made outside the tool loop, so no tool
+  telemetry sees them. Both are reported in the run summary, and `/decision`
+  carries the decision layer's running total:
+  `stop=completed steps=4 decisions=2 decision_tokens=52 decision_ms=180`. As
+  with `plan_tokens`, tokens are omitted rather than reported as `0` when no
+  backend reports usage, because `0` would read as "free", which is not what
+  happened. A run that calls neither prints exactly what it printed before.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool
   execution (`ToolDecoding` + token usage); `/decoding-report` summarizes it by
   `(tool, profile, model)` via `DecodingAnalyzer` (`@adaptivemcp/routing`).
@@ -327,7 +335,9 @@ pnpm dev -- --system1          # uses $SYSTEM1_MODEL, else tev1:0.8b
 
 - The backend URL reuses `$OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`).
 - `/decision` shows the last decision (model, tools, decoding, confidence,
-  rationale).
+  rationale) plus what the decision layer's calls have cost this run
+  (`decisions=… decision_tokens=… decision_ms=…`), which nothing else reports —
+  the loop's telemetry only ever sees tool executions.
 
 **Remote backends.** The decision layer is not tied to a local Ollama. The same
 `DecisionBackend` seam has a second, remote tier: `OpenAiSystemOneBackend` posts

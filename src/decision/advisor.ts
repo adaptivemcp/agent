@@ -1,4 +1,5 @@
 import type { DecodingProfileId } from "@adaptivemcp/routing";
+import type { ChatUsage } from "../types.js";
 import type {
   DecisionBackend,
   SystemOneAnswer,
@@ -6,6 +7,7 @@ import type {
   SystemOneNoulQuestion,
   SystemOneQuestion,
   SystemOneResponse,
+  SystemOneUsage,
 } from "./systemone.js";
 
 /** A tool as summarized from Adaptive MCP metadata for the decision state. */
@@ -32,6 +34,26 @@ export interface SystemOneAdvisorInput {
   message: string;
   tools: DecisionToolInfo[];
   models: DecisionModelInfo[];
+  /** The loop step this decision is for, when the caller knows it (for reporting). */
+  step?: number;
+}
+
+/**
+ * One call to the decision backend, reported so a host can account for it.
+ *
+ * The decision layer is the run's own model call too — the remote tier is a
+ * real, billed completion — but it happens outside the tool loop, so the
+ * observation path never sees it. Reported for a call that **failed**, and for
+ * one whose answer was discarded (low confidence, or no question to ask), for
+ * the same reason: the tokens were spent.
+ */
+export interface DecisionCall {
+  step?: number;
+  durationMs: number;
+  /** Tokens the backend reported, when it reported any. */
+  usage?: ChatUsage;
+  /** Whether the backend answered at all. */
+  ok: boolean;
 }
 
 /** The distilled decision a host can apply to the next completion. */
@@ -59,6 +81,11 @@ export interface SystemOneAdvisorOptions {
   maxModels?: number;
   /** Called when the backend fails; the advisor then declines (returns undefined). */
   onError?: (error: unknown) => void;
+  /**
+   * Every backend call, including one that failed or was discarded — so a host
+   * can account for tokens and latency the tool loop never sees (#73's twin).
+   */
+  onCall?: (call: DecisionCall) => void;
 }
 
 const DECODING_PROFILES: Record<DecodingProfileId, string> = {
@@ -82,6 +109,7 @@ export class SystemOneAdvisor {
   private readonly maxTools: number;
   private readonly maxModels: number;
   private readonly onError?: (error: unknown) => void;
+  private readonly onCall?: (call: DecisionCall) => void;
 
   constructor(options: SystemOneAdvisorOptions) {
     this.backend = options.backend;
@@ -89,6 +117,7 @@ export class SystemOneAdvisor {
     this.maxTools = options.maxTools ?? 20;
     this.maxModels = options.maxModels ?? 20;
     this.onError = options.onError;
+    this.onCall = options.onCall;
   }
 
   async decide(input: SystemOneAdvisorInput): Promise<SystemOneDecision | undefined> {
@@ -100,12 +129,23 @@ export class SystemOneAdvisor {
     if (Object.keys(questions).length === 0) return undefined;
 
     let response: SystemOneResponse;
+    const started = Date.now();
     try {
       response = await this.backend.answer(stateFor(input.message, tools, models), questions);
     } catch (error) {
+      // Report the call before the error: it was made, so it was paid for.
+      this.onCall?.({ step: input.step, durationMs: Date.now() - started, ok: false });
       this.onError?.(error);
       return undefined;
     }
+    // Reported before the verdict is interpreted, for the same reason: the
+    // tokens were spent whether or not the answer turned out usable.
+    this.onCall?.({
+      step: input.step,
+      durationMs: Date.now() - started,
+      usage: reportedTokens(response.usage),
+      ok: true,
+    });
 
     return this.interpret(response, maps);
   }
@@ -164,6 +204,20 @@ export class SystemOneAdvisor {
     decision.rationale = rationale.join("; ");
     return decision;
   }
+}
+
+/**
+ * The tokens a backend reported, or `undefined` when it reported none.
+ *
+ * Both transports default the counts to `0` when a response carries no `usage`,
+ * so zero here means "not reported" rather than "free": printing `tokens=0`
+ * would claim the decision cost nothing, which is not what happened.
+ */
+function reportedTokens(usage: SystemOneUsage | undefined): ChatUsage | undefined {
+  const input = usage?.input_tokens ?? 0;
+  const output = usage?.output_tokens ?? 0;
+  if (input <= 0 && output <= 0) return undefined;
+  return { inputTokens: input, outputTokens: output };
 }
 
 interface QuestionMaps {

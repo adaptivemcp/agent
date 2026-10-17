@@ -101,7 +101,12 @@ reads the leader's session, and a child is not the leader. Because that call is 
 run's own model call made **outside** the loop, the recorded telemetry never sees
 it; `PlanningPassOptions.onCall` reports each one and the CLI aggregates it into the
 run summary (`plans=… plan_tokens=… plan_ms=…`), so planning is visible rather than
-free-looking (#73).
+free-looking (#73). The **decision layer** spends the same way — the remote
+System One tier is a billed completion — and is accounted the same way
+(`SystemOneAdvisor`'s `onCall` → `AgentRuntime.decisionCallSummary()`, printed as
+`decisions=… decision_tokens=… decision_ms=…` and shown by `/decision`). Both are
+the host's own calls: the Adaptive MCP observation path only ever sees tool
+executions.
 The runtime's two supporting hooks are `queueMessage`/`drainQueuedMessages` (how a
 background child reports back without the parent polling) and the `store` option
 (how a child shares the parent's memory; a runtime handed a store does not close
