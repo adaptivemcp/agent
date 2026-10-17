@@ -478,9 +478,10 @@ Usage:
 Options:
   --server <name=command args>  MCP server over stdio (repeatable)
                                 (default: the sibling adaptive-mcp example server)
-  --skills <dir>                Skills directory: <name>/SKILL.md per skill (repeatable;
-                                ./skills is added when it exists). Only names and
-                                descriptions enter the prompt; bodies load on demand
+  --skills <dir>                Skills directory: <name>/SKILL.md per skill (repeatable).
+                                ./skills and $XDG_CONFIG_HOME/agent/skills are searched
+                                too, a project skill winning over a user one. Only names
+                                and descriptions enter the prompt; bodies load on demand
   --prompt <text>               One-shot prompt instead of the interactive REPL
   -i, --interactive             Force the interactive REPL
   --model <id>                  Pin one catalog model (disables adaptive selection)

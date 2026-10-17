@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { AggregateToolset, sanitize, type ResourceToolset, type Toolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
 import { HttpToolset } from "./mcp/http.js";
@@ -42,6 +41,7 @@ import {
 import {
   agentDefinition,
   discoverSkills,
+  skillDirs,
   skillsPrompt,
   skillsToolset,
   type AgentDefinition,
@@ -211,7 +211,7 @@ async function main(): Promise<void> {
   // Skills are host-owned instructions exposed as an ordinary toolset, so
   // reading one takes the same path as any MCP tool (gate, telemetry, graph).
   // Only names and descriptions reach the prompt; the body is fetched on demand.
-  const skills = discoverSkills(skillDirs(args), (message) => {
+  const skills = discoverSkills(skillDirs(args.skills), (message) => {
     if (args.verbose) console.warn(`[skills] ${message}`);
   });
   const sessionId = args.session ?? `cli-${Date.now()}`;
@@ -266,7 +266,8 @@ async function main(): Promise<void> {
   const tools = new AggregateToolset(toolsetList);
   if (args.verbose && skills.length > 0) {
     console.log(
-      `[skills] ${skills.length} loaded: ${skills.map((skill) => skill.name).join(", ")}`,
+      `[skills] ${skills.length} loaded: ` +
+        `${skills.map((skill) => `${skill.name} (${skill.origin})`).join(", ")}`,
     );
   }
 
@@ -671,18 +672,6 @@ async function main(): Promise<void> {
     drainNotifications();
     await headroom?.close();
   }
-}
-
-/**
- * The skills directories for this run: every `--skills` value, plus the
- * `./skills` convention when it exists — so dropping a skills directory next to
- * the project is enough, with no flag.
- */
-function skillDirs(args: CliArgs): string[] {
-  const dirs = [...args.skills];
-  const convention = join(process.cwd(), "skills");
-  if (!dirs.includes(convention) && existsSync(convention)) dirs.push(convention);
-  return dirs;
 }
 
 /** Child step cap: a sub-agent is for one bounded piece of work, not a second run. */

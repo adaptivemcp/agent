@@ -94,7 +94,7 @@ skill; "read a file" is a tool.
 | --------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
 | `SKILL.md` definition + trigger description   | ✅     | `src/skills.ts`: frontmatter `name`/`description`, the `description` used as the trigger                        |
 | Progressive disclosure                        | ✅     | the prompt carries names + descriptions only; the body loads through `skills_read_skill`, bundled files by name |
-| Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable) plus the `./skills` convention; no user-level default, nothing remote             |
+| Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable), the `./skills` convention, and a user-level default; nothing remote             |
 | Supply chain (fetch / cache / version)        | ❌     | local directories only — nothing is fetched, so nothing needs signing                                           |
 | Invocation (context injection vs sub-session) | ✅     | both, explicitly: the body enters the current context via `skills_read_skill`, or the skill runs as an isolated sub-session when a `task` names it (`agent`), where its `tools`/`deny` narrows what that child may use |
 
@@ -110,8 +110,9 @@ Skills are a **document format plus a loader**, not a runtime:
 
 1. **Definition + discovery** — a `skills/` convention (project + user),
    frontmatter parsing, and the `description`-as-trigger rule. **Done:**
-   `src/skills.ts` + `--skills` / `./skills`; a user-level default directory is
-   still missing.
+   `src/skills.ts` + `--skills` / `./skills` / the user default
+   (`$XDG_CONFIG_HOME/agent/skills`), searched in precedence order so a project
+   skill wins over a user one of the same name.
 2. **Progressive disclosure** — expose only `name` + `description` up front; load
    the body on selection; expose `reference/` only when the procedure asks.
    **Done:** the prompt lists names + descriptions, and `skills_read_skill` reads

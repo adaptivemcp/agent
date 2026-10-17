@@ -30,9 +30,12 @@ interface CliRun {
 }
 
 /** Run the real CLI as a child process, the way a user would. */
-function runCli(args: string[]): Promise<CliRun> {
+function runCli(args: string[], env: Record<string, string> = {}): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], { cwd: root });
+    const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], {
+      cwd: root,
+      env: { ...process.env, ...env },
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -624,6 +627,53 @@ describe("cli, end to end and offline", () => {
     // destructive one, the delegation tool, or the skill reader.
     expect(offeredTools(childRequest!)).toEqual(["fixture_fixture_echo"]);
     rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("loads a user-level skill from $XDG_CONFIG_HOME, and says which level it came from", async () => {
+    // A skill the machine keeps for every project. It has to load with no flag,
+    // and the prompt has to mark it user-level: otherwise a project-local name and
+    // a machine-wide one read the same, and "local" is a guess.
+    const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-user-skills-"));
+    const dir = join(configHome, "agent", "skills", "commit-style");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      "---\nname: commit-style\ndescription: Write commit messages this way\n---\n\nUse the imperative mood.\n",
+    );
+    model = new StubModelServer({ respond: () => ({ text: "done" }) });
+    const baseUrl = await model.start();
+
+    const run = await runCli(
+      [
+        "--prompt",
+        "say hello",
+        "--server",
+        serverSpec(),
+        "--base-url",
+        baseUrl,
+        "--api-key",
+        "test-key",
+        "--no-ollama",
+        "--no-stream",
+        "--db",
+        ":memory:",
+        "--session",
+        "cli-e2e-user-skills",
+        "--max-steps",
+        "1",
+      ],
+      { XDG_CONFIG_HOME: configHome },
+    );
+
+    expect(run.code).toBe(0);
+    // It is a skill like any other: the loader exposed the read tool…
+    expect(offeredTools(model.requests[0]!)).toContain("skills_read_skill");
+    // …and the prompt carries it under the user level rather than anonymously.
+    const system = model.requests[0]?.messages.find((message) => message.role === "system");
+    expect(system?.content).toContain("User skills:");
+    expect(system?.content).toContain("commit-style: Write commit messages this way");
+
+    rmSync(configHome, { recursive: true, force: true });
   }, 30_000);
 
   it("pauses a high-risk call, then resumes the run that stopped on it", async () => {
