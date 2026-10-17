@@ -3,6 +3,7 @@ import { MemoryStore } from "@adaptivemcp/memory";
 import type { Task } from "@adaptivemcp/spec";
 import {
   PlanningPass,
+  PlanUsage,
   actionStep,
   actionSummary,
   formatSteps,
@@ -12,9 +13,10 @@ import {
   planReasoning,
   planningMessages,
   recordedLines,
+  type PlanCall,
 } from "./steps.js";
 import { AgentRuntime } from "./runtime.js";
-import type { ChatMessage, ChatModel, ChatStep, ToolSpec } from "./types.js";
+import type { ChatMessage, ChatModel, ChatStep, ChatUsage, ToolSpec } from "./types.js";
 
 function newStore(): MemoryStore {
   return new MemoryStore({ path: ":memory:" });
@@ -25,12 +27,15 @@ class AnsweringModel implements ChatModel {
   readonly name = "answering";
   readonly calls: ChatMessage[][] = [];
 
-  constructor(private readonly answer: string | Error = "ok") {}
+  constructor(
+    private readonly answer: string | Error = "ok",
+    private readonly usage?: ChatUsage,
+  ) {}
 
   async step(messages: ChatMessage[]): Promise<ChatStep> {
     this.calls.push(messages);
     if (this.answer instanceof Error) throw this.answer;
-    return { text: this.answer, toolCalls: [], finishReason: "stop" };
+    return { text: this.answer, toolCalls: [], finishReason: "stop", usage: this.usage };
   }
 }
 
@@ -154,7 +159,8 @@ describe("reading a session's history back", () => {
     ).toEqual(["- task t2 [completed] audit (reviewer) → clean"]);
   });
 
-  it("reads only the tail of a long history", () => {    const records = Array.from({ length: 60 }, (_, index) => ({
+  it("reads only the tail of a long history", () => {
+    const records = Array.from({ length: 60 }, (_, index) => ({
       id: `act-${index}`,
       sessionId: "s1",
       kind: "action" as const,
@@ -433,6 +439,85 @@ describe("the planning pass", () => {
     expect((errors[0] as Error).message).toContain("no usable steps");
     expect(store.getSteps("s1")).toEqual([]);
     store.close();
+  });
+
+  it("reports every planning call, so its cost is not invisible", async () => {
+    // The planning call happens outside the loop, so the runtime's telemetry and
+    // cost never see it: this hook is the only report a host gets (#73).
+    const store = newStore();
+    const calls: PlanCall[] = [];
+    const pass = new PlanningPass({
+      model: new AnsweringModel('{"steps":["read it"]}', { inputTokens: 30, outputTokens: 7 }),
+      store: () => store,
+      session: "s1",
+      interval: 1,
+      onCall: (call) => calls.push(call),
+    });
+
+    await pass.steer({ step: 0, messages: goal });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      step: 0,
+      ok: true,
+      usage: { inputTokens: 30, outputTokens: 7 },
+    });
+    expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0);
+    store.close();
+  });
+
+  it("reports a failed call too, and an unusable answer, because both were paid for", async () => {
+    const store = newStore();
+    const calls: PlanCall[] = [];
+    const options = {
+      store: () => store,
+      session: "s1",
+      interval: 1,
+      onCall: (call: PlanCall) => calls.push(call),
+    };
+
+    await new PlanningPass({ ...options, model: new AnsweringModel(new Error("down")) }).steer({
+      step: 0,
+      messages: goal,
+    });
+    // The model answered; the plan was unusable. Tokens still spent.
+    await new PlanningPass({ ...options, model: new AnsweringModel("   ") }).steer({
+      step: 1,
+      messages: goal,
+    });
+    // Not due, so nothing was called and nothing is reported.
+    await new PlanningPass({ ...options, interval: 5, model: new AnsweringModel("x") }).steer({
+      step: 2,
+      messages: goal,
+    });
+
+    expect(calls.map((call) => call.ok)).toEqual([false, true]);
+    expect(store.getSteps("s1", { kind: "plan" })).toEqual([]);
+    store.close();
+  });
+
+  it("summarises planning for a run, and says nothing when there was none", () => {
+    const usage = new PlanUsage();
+    // A run without --plan-interval prints exactly what it printed before.
+    expect(usage.summary()).toBe("");
+
+    usage.record({
+      step: 0,
+      durationMs: 40,
+      ok: true,
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    usage.record({ step: 3, durationMs: 10, ok: false });
+    // Tokens are reported once any backend reports them, and the failed call
+    // contributes its latency but no tokens.
+    expect(usage.summary()).toBe(" plans=2 plan_tokens=15 plan_ms=50");
+  });
+
+  it("omits tokens rather than reporting zero when no backend reports usage", () => {
+    const usage = new PlanUsage();
+    usage.record({ step: 0, durationMs: 5, ok: true });
+    // `plan_tokens=0` would read as "planning is free", which is not what happened.
+    expect(usage.summary()).toBe(" plans=1 plan_ms=5");
   });
 });
 

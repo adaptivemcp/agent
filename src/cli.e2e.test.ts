@@ -316,6 +316,9 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout).toContain("stop=completed");
     // The plan reached the model as a turn it could act on.
     expect(run.stdout).toContain("Plan (asked before step 1");
+    // The planning calls happen outside the loop, so the run summary is the one
+    // place their cost is visible (#73).
+    expect(run.stdout).toContain("plans=2");
 
     const planningRequests = model.requests.filter((request) =>
       request.messages.some(

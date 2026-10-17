@@ -24,7 +24,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { ActionStep, PlanStep, StepRecord, Store, Task } from "@adaptivemcp/spec";
-import type { ChatMessage, ChatModel, ToolExecutionResult } from "./types.js";
+import type { ChatMessage, ChatModel, ChatUsage, ToolExecutionResult } from "./types.js";
 
 /** How much of a tool's error message a step keeps. Enough to act on, not a dump. */
 const MAX_ERROR_CHARS = 200;
@@ -255,6 +255,59 @@ export interface PlanningPassOptions {
   interval: number;
   /** A pass that produced no plan: reported, never fatal. */
   onError?: (error: unknown) => void;
+  /** Every planning call, including one that failed — so a host can account for it. */
+  onCall?: (call: PlanCall) => void;
+}
+
+/**
+ * One planning model call.
+ *
+ * A planning call is the run's *own* model call outside the loop, so nothing in
+ * the Adaptive MCP observation path sees it: telemetry is about tool executions.
+ * Reporting it here is what lets a host put it in front of a user (#73).
+ */
+export interface PlanCall {
+  /** The loop step the pass ran for. */
+  step: number;
+  durationMs: number;
+  /** The backend's token usage, when it reports one. */
+  usage?: ChatUsage;
+  /** False when the call itself failed; the step then proceeded unplanned. */
+  ok: boolean;
+}
+
+/**
+ * What a run's planning calls cost, for a run summary.
+ *
+ * Deliberately small: a count, tokens and latency, and nothing at all when the run
+ * never planned — so `--plan-interval` is the only thing that changes what a
+ * summary says.
+ */
+export class PlanUsage {
+  private calls = 0;
+  private durationMs = 0;
+  private tokens: number | undefined;
+
+  record(call: PlanCall): void {
+    this.calls += 1;
+    this.durationMs += call.durationMs;
+    if (call.usage) {
+      this.tokens =
+        (this.tokens ?? 0) + (call.usage.inputTokens ?? 0) + (call.usage.outputTokens ?? 0);
+    }
+  }
+
+  /**
+   * The suffix for a run summary, or `""` when nothing was planned — a run
+   * without `--plan-interval` prints exactly what it printed before. Tokens are
+   * omitted rather than shown as 0 when no backend reported any, which a count of
+   * `0` would misrepresent as "planning is free".
+   */
+  summary(): string {
+    if (this.calls === 0) return "";
+    const tokens = this.tokens === undefined ? "" : ` plan_tokens=${this.tokens}`;
+    return ` plans=${this.calls}${tokens} plan_ms=${this.durationMs}`;
+  }
 }
 
 /**
@@ -283,17 +336,31 @@ export class PlanningPass {
     if (!store) return undefined;
 
     const records = store.getSteps?.(this.options.session) ?? [];
+    const started = Date.now();
     let answer: string;
+    let usage: ChatUsage | undefined;
     try {
       const step = await this.options.model.step(
         planningMessages(goalOf(context.messages), recordedLines(records)),
         [],
       );
       answer = step.text ?? "";
+      usage = step.usage;
     } catch (error) {
+      // Report the call before the error: it was made, so it was paid for.
+      this.options.onCall?.({ step: context.step, durationMs: Date.now() - started, ok: false });
       this.options.onError?.(error);
       return undefined;
     }
+    //
+    // Reported before the plan is parsed, for the same reason: the tokens were
+    // spent whether or not the answer was usable.
+    this.options.onCall?.({
+      step: context.step,
+      durationMs: Date.now() - started,
+      usage,
+      ok: true,
+    });
 
     const parsed = parsePlan(answer);
     if (parsed.steps.length === 0) {
