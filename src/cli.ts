@@ -10,7 +10,7 @@ import {
   type McpCallClient,
   type Middleware,
 } from "@adaptivemcp/middleware";
-import { TOOLS_METADATA_RESOURCE_URI } from "@adaptivemcp/spec";
+import { TOOLS_METADATA_RESOURCE_URI, type Store } from "@adaptivemcp/spec";
 import { load as parseYaml } from "js-yaml";
 import { AgentRuntime, type ServerToolsMetadata } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
@@ -46,6 +46,7 @@ import {
   skillsToolset,
   type AgentDefinition,
 } from "./skills.js";
+import { tasksPrompt, tasksToolset } from "./tasks.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -226,8 +227,19 @@ async function main(): Promise<void> {
         context: DelegationContext,
       ) => Promise<SubagentResult>)
     | undefined;
+  // The task list lives in the store, and the runtime owns the store; the runtime
+  // is built inside the run below, so the toolset reads this at call time.
+  let activeStore: Store | undefined;
   const toolsetList: Toolset[] = [...toolsets];
   if (skills.length > 0) toolsetList.push(skillsToolset(skills));
+  if (args.tasks) {
+    toolsetList.push(
+      tasksToolset({
+        session: sessionId,
+        store: () => activeStore,
+      }),
+    );
+  }
   if (args.task) {
     toolsetList.push(
       taskToolset({
@@ -345,6 +357,8 @@ async function main(): Promise<void> {
           }
         : undefined,
     });
+    // Now that the runtime exists, the task tools can reach its store.
+    activeStore = runtime.adaptive.memory;
     // A background child announces its result through the runtime's queue, so it
     // arrives as a steering message on the parent's next step — the parent is
     // never asked to poll.
@@ -385,7 +399,12 @@ async function main(): Promise<void> {
         : "";
     // Progressive disclosure: skills contribute names and descriptions here, and
     // their bodies only when the model asks for one.
-    const systemWithServers = [baseSystem, serverBlock, skillsPrompt(skills)]
+    const systemWithServers = [
+      baseSystem,
+      serverBlock,
+      skillsPrompt(skills),
+      args.tasks ? tasksPrompt() : "",
+    ]
       .filter(Boolean)
       .join("\n\n");
 

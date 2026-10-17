@@ -54,7 +54,7 @@ Each archetype file follows the same shape:
 | Durable state (store, session, history)                          | 🟡         |
 | **Pause/resume primitive** (`interrupt` / `resume`)              | ✅         |
 | **Sub-agent delegation** (isolated session, derived permissions) | ✅         |
-| **Shared task list** (+ orchestration modes)                     | ❌         |
+| **Shared task list** (+ orchestration modes)                     | 🟡         |
 | **Skills** (SKILL.md, progressive disclosure, supply chain)      | 🟡         |
 | **Pipeline / step model** (conditions, loops, parallel, routing) | ❌         |
 | **Planning passes + typed memory steps**                         | ❌         |
@@ -69,7 +69,7 @@ component_, not a commitment.
 | --- | --------------------------------------------------------------------------- | ----- | ------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Pause/resume primitive (`interrupt`/`resume` over durable state)            | #35   | durable state (🟡)             | small      | **done** — `--pause`/`--resume`, verified end to end (#46)                                                                                        |
 | 2   | Sub-agent delegation (isolated session, derived permissions, fg/bg, notify) | #36   | 1 (for suspension of children) | medium     | **done** — `task` tool, isolation, fg/bg, named agents that narrow tools (#52); a child that needs approval still denies until pause/resume lands |
-| 3   | Shared task list + orchestration modes                                      | #37   | 2                              | medium     | not started                                                                                                                                       |
+| 3   | Shared task list + orchestration modes                                      | #37   | 2                              | medium     | **half done** — `tasks_*` tools over the `spec` `Task`; orchestration modes open                                                                  |
 | 4   | Skills: `SKILL.md` discovery, progressive disclosure, supply chain          | #38   | —                              | medium     | **mostly done** — loader + `--skills`; supply chain (fetch/cache/version) open                                                                    |
 | 5   | Pipeline / step model (conditions, loops, parallel, fan-out)                | #39   | 3 (task list)                  | large      | not started                                                                                                                                       |
 | 6   | Planning passes + typed memory steps (task/action/plan records)             | #40   | —                              | small      | not started                                                                                                                                       |

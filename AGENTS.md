@@ -158,6 +158,14 @@ unknown name fails the call rather than quietly acting as a generalist. Its
 completion notifications arrive through `AgentRuntime.queueMessage`, which
 `review()` drains one step at a time.
 
+**Task list** (`src/tasks.ts`) is the shared plan, off unless `--tasks`:
+`tasks_create`/`tasks_list`/`tasks_update` over the `spec` `Task` that `memory`
+persists, with the store's `readyTasks` doing the dependency ordering — an id that
+names no task blocks, so a typo is visible rather than skipped. It is an ordinary
+toolset like the others, so writing a task lands in the same graph and telemetry as
+any other call; `tasksPrompt()` is the system-prompt paragraph and lives with the
+tools so the two cannot drift.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

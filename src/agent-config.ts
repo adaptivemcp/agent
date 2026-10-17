@@ -24,6 +24,7 @@ const BOOLEAN_KEYS = [
   "system1",
   "awaitJobs",
   "task",
+  "tasks",
   "noOllama",
   "noStream",
   "autoApprove",

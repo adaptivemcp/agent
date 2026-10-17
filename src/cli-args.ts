@@ -76,6 +76,12 @@ export interface CliArgs {
    */
   task: boolean;
   /**
+   * Expose the shared task list: `tasks_*` tools that persist intended work, its
+   * order and its outcome. Off by default; the list lives in the run's store, so
+   * `--db` is what makes it outlive the run.
+   */
+  tasks: boolean;
+  /**
    * Pause instead of denying when a tool needs confirmation in a non-interactive
    * run, so a human can answer it later (`--resume`). Needs `--db`; exits `5`.
    */
@@ -134,6 +140,7 @@ const DEFAULT_ARGS: CliArgs = {
   help: false,
   version: false,
   task: false,
+  tasks: false,
   pause: false,
   deny: false,
   suspensions: false,
@@ -266,6 +273,9 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         break;
       case "--task":
         args.task = true;
+        break;
+      case "--tasks":
+        args.tasks = true;
         break;
       case "--pause":
         args.pause = true;
@@ -456,6 +466,8 @@ Options:
   --await-jobs                  Poll long-running tool jobs (job handles) to completion
   --task                        Expose delegation: a "task" tool that runs a sub-agent in
                                 its own session and returns only its result
+  --tasks                       Keep a shared task list (tasks_* tools) in the run's store;
+                                add --db to keep it across runs
   --base-url <url>              Override the local integration's base URL
   --api-key <key>               Override the local integration's API key
   --no-stream                   Disable token streaming

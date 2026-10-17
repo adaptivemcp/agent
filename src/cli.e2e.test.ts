@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { MemoryStore } from "@adaptivemcp/memory";
 import { StubModelServer, offeredTools } from "./testing/openai-stub.js";
 
 /**
@@ -94,6 +95,61 @@ describe("cli, end to end and offline", () => {
     expect(model.requests).toHaveLength(2);
     expect(model.requests[0]?.messages.some((message) => message.role === "tool")).toBe(false);
     expect(model.requests[1]?.messages.some((message) => message.role === "tool")).toBe(true);
+  }, 30_000);
+
+  it("keeps a task list the model wrote down in the store the run was given", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-tasks-"));
+    const db = join(dir, "agent.db");
+    model = new StubModelServer({
+      respond: (request) => {
+        const answered = request.messages.some((message) => message.role === "tool");
+        return answered
+          ? { text: "planned" }
+          : {
+              toolName: "tasks_create",
+              toolInput: { title: "write the parser", dependsOn: [] },
+            };
+      },
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "plan the work",
+      "--tasks",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      db,
+      "--session",
+      "cli-e2e-tasks",
+      "--max-steps",
+      "3",
+    ]);
+
+    expect(run.code).toBe(0);
+    // The flag reached the tool list the model saw, and the call ran.
+    expect(offeredTools(model.requests[0]!)).toContain("tasks_create");
+    expect(run.stdout).toContain("tasks_create");
+    // The result carried the task's id back, so the tool found a real store.
+    expect(JSON.stringify(model.requests[1]?.messages)).toContain("t1");
+
+    // And the list outlived the process: the task is in the database the run was
+    // given, readable through the same store the agent itself uses.
+    const store = new MemoryStore({ path: db });
+    const tasks = store.getTasks?.("cli-e2e-tasks") ?? [];
+    store.close();
+    expect(tasks.map((task) => ({ id: task.id, title: task.title, status: task.status }))).toEqual([
+      { id: "t1", title: "write the parser", status: "pending" },
+    ]);
+
+    rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 
   it("keeps a background child working after the parent's turn ends", async () => {

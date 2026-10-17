@@ -107,6 +107,17 @@ generated; tool calls and results print underneath. Commands: `/tools`,
   an agent definition, and the child gets the intersection of its parent's tools
   and that policy — an allowlist can only narrow, never grant. An unknown name
   fails the call rather than quietly acting as a generalist.
+- **Task list.** `--tasks` exposes a shared task list as ordinary tools —
+  `tasks_create`, `tasks_list`, `tasks_update`. Work that spans steps is written
+  down before it starts, with `dependsOn` naming the ids it waits on, and a task
+  moves `pending → in_progress → completed` as it is picked up and finished, with
+  the `result` recorded on it. `tasks_list` with `ready: true` answers "what can
+  start now" — every dependency completed, and an id that names no task blocks
+  rather than unblocks, so a typo is visible instead of skipped — and an update
+  reports what it left unmet or just unblocked. The list lives in the run's store,
+  so `--db` makes it outlive the run and a resumed run reads the same plan; it is
+  the shared state that makes multi-step orchestration legible
+  (`docs/archetypes/orchestrator-agent.md`).
 - **Cost.** Priced models record their token cost per tool call; `/cost` shows
   the recorded totals.
 - **Decoding telemetry.** The decoding applied per step is recorded on each tool
