@@ -13,8 +13,15 @@
  * no new noun. This is a host-side loader over a filesystem convention, and its
  * files are treated as untrusted input — the read tool cannot escape a skill's
  * own directory.
+ *
+ * Three levels are searched, highest precedence first: the explicit `--skills`
+ * directories, the project's `./skills`, then the user-level default. Order *is*
+ * the precedence — a project skill overrides the user's copy of the same name
+ * rather than the two merging — and the prompt says which level each one came
+ * from, so a name that looks local but is not cannot be mistaken for one.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { load as parseYaml } from "js-yaml";
 import type { McpToolResult, Toolset } from "./mcp/toolset.js";
@@ -30,11 +37,68 @@ const MAX_OUTPUT_CHARS = 24_000;
 const MAX_FILES = 50;
 const MAX_DEPTH = 3;
 
+/**
+ * Which level of the search a skill came from. "project" is a skill the operator
+ * or the repository supplied (an explicit `--skills` directory, or the `./skills`
+ * convention); "user" is the machine-wide default, shared across projects.
+ */
+export type SkillOrigin = "project" | "user";
+
+/** A directory to search for skills, and the precedence level it represents. */
+export interface SkillDir {
+  path: string;
+  origin: SkillOrigin;
+}
+
+/** The user-level skills directory: `$XDG_CONFIG_HOME/agent/skills`, else `~/.config/agent/skills`. */
+export function userSkillsDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const configHome = env.XDG_CONFIG_HOME?.trim() || join(home, ".config");
+  return join(configHome, "agent", "skills");
+}
+
+/**
+ * The skills directories for a run, **highest precedence first**: the explicit
+ * directories, then the project's `./skills` convention, then the user-level
+ * default. A level is only added when the directory exists (except an explicit
+ * one, whose absence is tolerated by the loader); `discoverSkills` then keeps the
+ * first definition of a name, which is what makes the order the precedence.
+ */
+export function skillDirs(
+  explicit: string[],
+  {
+    cwd = process.cwd(),
+    env = process.env,
+    home = homedir(),
+  }: { cwd?: string; env?: NodeJS.ProcessEnv; home?: string } = {},
+): SkillDir[] {
+  const dirs: SkillDir[] = [];
+  const seen = new Set<string>();
+  const push = (path: string, origin: SkillOrigin): void => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    dirs.push({ path, origin });
+  };
+  // An explicit directory always counts, even before it exists (the loader
+  // tolerates a missing one); the convention and the user default are searched
+  // only when they are actually there.
+  for (const path of explicit) push(path, "project");
+  const convention = join(cwd, "skills");
+  if (existsSync(convention)) push(convention, "project");
+  const user = userSkillsDir(env, home);
+  if (existsSync(user)) push(user, "user");
+  return dirs;
+}
+
 export interface Skill {
   name: string;
   description: string;
   /** Absolute path of the skill directory. */
   dir: string;
+  /** Which search level it was found at, for precedence and provenance. */
+  origin: SkillOrigin;
   /** Files bundled with the skill (relative paths), for the third disclosure level. */
   files: string[];
   /**
@@ -68,13 +132,17 @@ export interface AgentDefinition {
  * directory without `SKILL.md` is not a skill. A `SKILL.md` that cannot be
  * understood is **skipped with a warning** rather than failing the run: a typo
  * in one skill should not stop the agent.
+ *
+ * `dirs` is ordered by precedence, so the first definition of a name wins and a
+ * later one is reported rather than silently merged — the collision the operator
+ * cannot see is the one that matters.
  */
 export function discoverSkills(
-  dirs: string[],
+  dirs: SkillDir[],
   warn: (message: string) => void = () => {},
 ): Skill[] {
   const found = new Map<string, Skill>();
-  for (const dir of dirs) {
+  for (const { path: dir, origin } of dirs) {
     let entries: string[];
     try {
       entries = readdirSync(dir);
@@ -96,8 +164,12 @@ export function discoverSkills(
         warn(`${filePath}: SKILL.md needs YAML frontmatter with "name" and "description"; skipped`);
         continue;
       }
-      if (found.has(parsed.name)) {
-        warn(`${filePath}: duplicate skill "${parsed.name}" (already found); skipped`);
+      const existing = found.get(parsed.name);
+      if (existing) {
+        warn(
+          `${filePath}: duplicate skill "${parsed.name}" — already loaded from ` +
+            `${existing.origin} (${existing.dir}); keeping that one`,
+        );
         continue;
       }
       const root = resolve(dirPath);
@@ -105,6 +177,7 @@ export function discoverSkills(
         name: parsed.name,
         description: parsed.description,
         dir: root,
+        origin,
         files: listSkillFiles(root),
         tools: parsed.tools,
         deny: parsed.deny,
@@ -114,14 +187,27 @@ export function discoverSkills(
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The prompt-side listing: names and descriptions only, plus how to open one. */
+/**
+ * The prompt-side listing: names and descriptions only, plus how to open one,
+ * grouped by the level each skill was found at so its origin is explicit.
+ */
 export function skillsPrompt(skills: Skill[], toolName = "skills_read_skill"): string {
   if (skills.length === 0) return "";
-  return [
-    "Skills — instructions you can load on demand, before doing that kind of work:",
-    ...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+  const levels: Array<{ origin: SkillOrigin; label: string }> = [
+    { origin: "project", label: "Project skills" },
+    { origin: "user", label: "User skills" },
+  ];
+  const lines = ["Skills — instructions you can load on demand, before doing that kind of work:"];
+  for (const level of levels) {
+    const members = skills.filter((skill) => skill.origin === level.origin);
+    if (members.length === 0) continue;
+    lines.push(`${level.label}:`);
+    for (const skill of members) lines.push(`- ${skill.name}: ${skill.description}`);
+  }
+  lines.push(
     `Read one with ${toolName} {"skill": "<name>"}; its bundled files can be read with the same tool's "file" argument.`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 /**

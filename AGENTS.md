@@ -147,12 +147,16 @@ non-chat HTTP seam — never a `ChatModel`.
 
 **Skills** (`src/skills.ts`) are host-owned instructions, not a protocol concept
 (ADR-004): a directory of `<name>/SKILL.md` files, discovered from `--skills <dir>`
-(plus the `./skills` convention) and exposed to the model as an ordinary toolset
-(`skillsToolset`, namespaced `skills_*`), so reading one goes through
-`AgentRuntime.execute` like any MCP tool. Only `name`/`description` enter the
-system prompt — progressive disclosure — and the body is fetched on demand; the
-read tool is confined to the skill's own directory, and a malformed `SKILL.md` is
-warned about and skipped rather than failing the run.
+(plus the `./skills` convention and the user-level `$XDG_CONFIG_HOME/agent/skills`)
+and exposed to the model as an ordinary toolset (`skillsToolset`, namespaced
+`skills_*`), so reading one goes through `AgentRuntime.execute` like any MCP tool.
+The levels are searched in precedence order — explicit, then project, then user —
+and a name defined at a higher level wins, so a project skill overrides the user's
+copy of the same name rather than merging; the prompt groups the listing by level so
+each skill's provenance is visible. Only `name`/`description` enter the system
+prompt — progressive disclosure — and the body is fetched on demand; the read tool
+is confined to the skill's own directory, and a malformed `SKILL.md` is warned about
+and skipped rather than failing the run.
 
 **Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
 sub-agent that runs in its own session and returns only its result. Two rules

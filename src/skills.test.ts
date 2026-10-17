@@ -6,9 +6,17 @@ import {
   SKILL_FILE,
   agentDefinition,
   discoverSkills,
+  skillDirs,
   skillsPrompt,
   skillsToolset,
+  userSkillsDir,
+  type SkillDir,
 } from "./skills.js";
+
+/** Project-level directories, the common case in these tests. */
+function dirs(...paths: string[]): SkillDir[] {
+  return paths.map((path) => ({ path, origin: "project" }));
+}
 
 /** Write `<root>/<name>/SKILL.md` and return its directory. */
 function makeSkill(
@@ -44,7 +52,7 @@ describe("skills", () => {
       mkdirSync(join(root, "not-a-skill")); // a directory without SKILL.md
       writeFileSync(join(root, "loose.md"), "ignored"); // not a directory
 
-      const skills = discoverSkills([root]);
+      const skills = discoverSkills(dirs(root));
 
       expect(skills.map((skill) => skill.name)).toEqual(["audit", "deploy"]);
       expect(skills[0]?.description).toBe("Audit a repository");
@@ -57,7 +65,7 @@ describe("skills", () => {
       writeFileSync(join(bad, SKILL_FILE), "no frontmatter here");
       const warnings: string[] = [];
 
-      const skills = discoverSkills([root], (message) => warnings.push(message));
+      const skills = discoverSkills(dirs(root), (message) => warnings.push(message));
 
       expect(skills.map((skill) => skill.name)).toEqual(["good"]);
       expect(warnings).toHaveLength(1);
@@ -70,12 +78,12 @@ describe("skills", () => {
       writeFileSync(join(dir, SKILL_FILE), "---\nname: half\n---\nbody");
       const warnings: string[] = [];
 
-      expect(discoverSkills([root], (message) => warnings.push(message))).toEqual([]);
+      expect(discoverSkills(dirs(root), (message) => warnings.push(message))).toEqual([]);
       expect(warnings).toHaveLength(1);
     });
 
     it("ignores a directory that does not exist", () => {
-      expect(discoverSkills([join(root, "nope")])).toEqual([]);
+      expect(discoverSkills(dirs(join(root, "nope")))).toEqual([]);
     });
 
     it("keeps the first of two skills that share a name", () => {
@@ -84,7 +92,7 @@ describe("skills", () => {
       makeSkill(second, "deploy", "Second");
       const warnings: string[] = [];
 
-      const skills = discoverSkills([root, second], (message) => warnings.push(message));
+      const skills = discoverSkills(dirs(root, second), (message) => warnings.push(message));
 
       expect(skills).toHaveLength(1);
       expect(skills[0]?.description).toBe("First");
@@ -98,7 +106,7 @@ describe("skills", () => {
       mkdirSync(join(dir, "scripts"));
       writeFileSync(join(dir, "scripts", "run.sh"), "echo hi");
 
-      const [skill] = discoverSkills([root]);
+      const [skill] = discoverSkills(dirs(root));
 
       expect(skill?.files).toEqual(["checklist.md", "scripts/run.sh"]);
     });
@@ -108,7 +116,7 @@ describe("skills", () => {
     it("returns the body and signs the bundled files", async () => {
       const dir = makeSkill(root, "deploy", "Deploy a service safely", "Step 1: check.");
       writeFileSync(join(dir, "checklist.md"), "- item");
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       expect((await toolset.listTools())[0]?.name).toBe("read_skill");
       const result = await toolset.callTool("read_skill", { skill: "deploy" });
@@ -122,7 +130,7 @@ describe("skills", () => {
     it("reads one bundled file", async () => {
       const dir = makeSkill(root, "deploy", "Deploy");
       writeFileSync(join(dir, "checklist.md"), "- item");
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       const result = await toolset.callTool("read_skill", {
         skill: "deploy",
@@ -136,7 +144,7 @@ describe("skills", () => {
     it("refuses to leave the skill directory", async () => {
       makeSkill(root, "deploy", "Deploy");
       writeFileSync(join(root, "secret.txt"), "s3cret");
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       const up = await toolset.callTool("read_skill", { skill: "deploy", file: "../secret.txt" });
 
@@ -149,7 +157,7 @@ describe("skills", () => {
       const sibling = join(root, "deploy-other");
       mkdirSync(sibling);
       writeFileSync(join(sibling, "secret.txt"), "s3cret");
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       const result = await toolset.callTool("read_skill", {
         skill: "deploy",
@@ -161,7 +169,7 @@ describe("skills", () => {
 
     it("reports an unknown skill instead of throwing", async () => {
       makeSkill(root, "deploy", "Deploy");
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       const result = await toolset.callTool("read_skill", { skill: "nope" });
 
@@ -175,7 +183,7 @@ describe("skills", () => {
         join(dir, SKILL_FILE),
         `---\nname: huge\ndescription: Huge\n---\n${"x".repeat(30_000)}`,
       );
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
 
       const result = await toolset.callTool("read_skill", { skill: "huge" });
 
@@ -183,7 +191,7 @@ describe("skills", () => {
     });
 
     it("rejects an unknown tool name", async () => {
-      const toolset = skillsToolset(discoverSkills([root]));
+      const toolset = skillsToolset(discoverSkills(dirs(root)));
       expect((await toolset.callTool("write_skill", {})).ok).toBe(false);
       await toolset.close();
     });
@@ -203,7 +211,7 @@ describe("skills", () => {
         "name: reviewer\ndescription: reads only\ntools:\n  - search_customer\ndeny:\n  - deploy_service",
       );
 
-      const [skill] = discoverSkills([root]);
+      const [skill] = discoverSkills(dirs(root));
 
       expect(skill?.tools).toEqual(["search_customer"]);
       expect(skill?.deny).toEqual(["deploy_service"]);
@@ -215,7 +223,7 @@ describe("skills", () => {
       writeSkill("typo", "name: typo\ndescription: d\ntools: search_customer");
       const warnings: string[] = [];
 
-      const skills = discoverSkills([root], (message) => warnings.push(message));
+      const skills = discoverSkills(dirs(root), (message) => warnings.push(message));
 
       expect(skills).toEqual([]);
       expect(warnings).toHaveLength(1);
@@ -224,7 +232,7 @@ describe("skills", () => {
     it("leaves the policy absent for an ordinary skill", () => {
       makeSkill(root, "plain", "no policy");
 
-      const [skill] = discoverSkills([root]);
+      const [skill] = discoverSkills(dirs(root));
 
       expect(skill?.tools).toBeUndefined();
       expect(skill?.deny).toBeUndefined();
@@ -238,7 +246,7 @@ describe("skills", () => {
         "---\nname: reviewer\ndescription: reads only\ntools:\n  - search_customer\n---\n\nRead, then report.\n",
       );
 
-      const definition = agentDefinition(discoverSkills([root])[0]!);
+      const definition = agentDefinition(discoverSkills(dirs(root))[0]!);
 
       expect(definition).toEqual({
         name: "reviewer",
@@ -254,7 +262,7 @@ describe("skills", () => {
     it("lists names and descriptions and how to open one — never a body", () => {
       makeSkill(root, "deploy", "Deploy a service safely", "SECRET BODY");
 
-      const prompt = skillsPrompt(discoverSkills([root]));
+      const prompt = skillsPrompt(discoverSkills(dirs(root)));
 
       expect(prompt).toContain("deploy: Deploy a service safely");
       expect(prompt).toContain("skills_read_skill");
@@ -264,5 +272,107 @@ describe("skills", () => {
     it("is empty with no skills", () => {
       expect(skillsPrompt([])).toBe("");
     });
+
+    it("names the level each skill came from, so a name that looks local is not mistaken for one", () => {
+      const project = join(root, "project");
+      const user = join(root, "user");
+      makeSkill(project, "review", "Review a diff");
+      makeSkill(user, "commit-style", "Write commit messages this way");
+
+      const prompt = skillsPrompt(
+        discoverSkills([
+          { path: project, origin: "project" },
+          { path: user, origin: "user" },
+        ]),
+      );
+
+      expect(prompt).toContain("Project skills:");
+      expect(prompt).toContain("- review: Review a diff");
+      expect(prompt).toContain("User skills:");
+      expect(prompt).toContain("- commit-style: Write commit messages this way");
+    });
+  });
+});
+
+describe("skill levels", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "agent-skills-levels-"));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("computes the user-level directory from $XDG_CONFIG_HOME, or falls back to ~/.config", () => {
+    expect(userSkillsDir({ XDG_CONFIG_HOME: "/opt/cfg" }, "/home/u")).toBe("/opt/cfg/agent/skills");
+    // A blank variable names no directory; the home fallback is the honest default.
+    expect(userSkillsDir({ XDG_CONFIG_HOME: "  " }, "/home/u")).toBe(
+      "/home/u/.config/agent/skills",
+    );
+    expect(userSkillsDir({}, "/home/u")).toBe("/home/u/.config/agent/skills");
+  });
+
+  it("orders the levels: explicit first, then ./skills, then the user default", () => {
+    const project = join(root, "proj");
+    const configHome = join(root, "config");
+    const user = join(configHome, "agent", "skills");
+    const explicit = join(root, "explicit");
+    mkdirSync(join(project, "skills"), { recursive: true });
+    mkdirSync(user, { recursive: true });
+    mkdirSync(explicit, { recursive: true });
+
+    const listed = skillDirs([explicit], {
+      cwd: project,
+      env: { XDG_CONFIG_HOME: configHome },
+      home: join(root, "home"),
+    });
+
+    expect(listed).toEqual([
+      { path: explicit, origin: "project" },
+      { path: join(project, "skills"), origin: "project" },
+      { path: user, origin: "user" },
+    ]);
+  });
+
+  it("skips a level whose directory does not exist, and never repeats one", () => {
+    const project = join(root, "proj");
+    mkdirSync(project, { recursive: true });
+
+    // No ./skills and no user default here; the explicit directory is passed twice.
+    const listed = skillDirs([root, root], {
+      cwd: project,
+      env: { XDG_CONFIG_HOME: join(root, "config") },
+      home: join(root, "home"),
+    });
+
+    expect(listed).toEqual([{ path: root, origin: "project" }]);
+  });
+
+  it("records where each skill was found, and keeps the higher level on a collision", () => {
+    const project = join(root, "proj", "skills");
+    const user = join(root, "config", "agent", "skills");
+    makeSkill(project, "review", "Project review");
+    makeSkill(user, "review", "User review");
+    makeSkill(user, "commit-style", "Write commit messages this way");
+    const warnings: string[] = [];
+
+    const skills = discoverSkills(
+      [
+        { path: project, origin: "project" },
+        { path: user, origin: "user" },
+      ],
+      (message) => warnings.push(message),
+    );
+
+    // The project's copy wins; the user's is reported rather than merged.
+    expect(skills.map((skill) => [skill.name, skill.description, skill.origin])).toEqual([
+      ["commit-style", "Write commit messages this way", "user"],
+      ["review", "Project review", "project"],
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("duplicate");
+    expect(warnings[0]).toContain("already loaded from project");
   });
 });
