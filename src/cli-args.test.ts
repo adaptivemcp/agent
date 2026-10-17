@@ -220,6 +220,14 @@ describe("parseArgs coverage of the full flag surface", () => {
     );
   });
 
+  it("accepts a planning interval, and rejects anything that is not a positive whole number", () => {
+    expect(parseArgs(["--plan-interval", "3"])).toMatchObject({ planInterval: 3 });
+    // Absent means off, so "0" is a typo rather than a silent no-op.
+    expect(() => parseArgs(["--plan-interval", "0"])).toThrow(/whole number/);
+    expect(() => parseArgs(["--plan-interval", "two"])).toThrow(/whole number/);
+    expect(() => parseArgs(["--plan-interval", "1.5"])).toThrow(/whole number/);
+  });
+
   it("accepts the short aliases", () => {
     const args = parseArgs(["-i", "-y", "-v", "-h"]);
     expect(args).toMatchObject({ interactive: true, autoApprove: true, verbose: true, help: true });

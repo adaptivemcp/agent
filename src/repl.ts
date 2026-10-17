@@ -51,6 +51,8 @@ export interface ReplOptions {
   decodingReport?: () => string;
   /** Text for `/graph` (the session's execution-graph tree). */
   graph?: () => string;
+  /** Text for `/steps` (the session's typed memory steps, read back). */
+  steps?: () => string;
   /** Text for `/models` (the model catalog). */
   models?: () => string;
   /** Text for `/decision` (the last System One decision). */
@@ -147,6 +149,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /tools              list discovered tools\n" +
                 "  /models             list model integrations (Adaptive MCP picks per tool)\n" +
                 "  /graph              show this session's execution-graph DAG\n" +
+                "  /steps              show this session's tasks, actions and plans\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /cost               show recorded cost per tool\n" +
                 "  /policy             show the server-governed policy in effect\n" +
@@ -183,6 +186,9 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/cost":
             output.write(options.cost ? `${options.cost()}\n` : color.dim("(no cost data)\n"));
+            continue;
+          case "/steps":
+            output.write(options.steps ? `${options.steps()}\n` : color.dim("(no history)\n"));
             continue;
           case "/policy":
             output.write(options.policy ? `${options.policy()}\n` : color.dim("(no policy)\n"));

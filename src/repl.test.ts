@@ -80,4 +80,27 @@ describe("runRepl render switch", () => {
     const stdout = await runTurn(decide);
     expect(stdout).toContain("adaptivemcp-agent");
   });
+
+  it("prints the typed history for /steps", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let stdout = "";
+    output.on("data", (chunk) => (stdout += String(chunk)));
+
+    const done = runRepl({
+      model: new ScriptedModel("hi"),
+      tools: [],
+      executor: NOOP_EXECUTOR,
+      steps: () => "12:00:01 plan   plan-1: read the parser",
+      input,
+      output,
+    });
+
+    input.write("/steps\n");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    input.write("/exit\n");
+    await done;
+
+    expect(stdout).toContain("plan-1: read the parser");
+  });
 });

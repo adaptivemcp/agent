@@ -47,6 +47,7 @@ import type {
 } from "./types.js";
 import type { ModelCatalog } from "./models/catalog.js";
 import type { McpToolResult, ToolCallContext } from "./mcp/toolset.js";
+import { actionStep } from "./steps.js";
 import { AI_SDK_CAPABILITIES } from "./provider/ai-sdk.js";
 import { localSystemOneBackend, type DecisionBackend } from "./decision/systemone.js";
 import { TieredSystemOneBackend } from "./decision/tiered.js";
@@ -314,7 +315,7 @@ export class AgentRuntime implements AgentExecutor {
       const decision = this.adaptive.approval.gate(spec.name, spec.serverName);
       if (decision === "require_confirmation") {
         const suspension = this.recordSuspension(spec, call);
-        return {
+        const paused: ToolExecutionResult = {
           ok: false,
           error: `paused for approval: ${suspension.id}`,
           decision,
@@ -322,6 +323,9 @@ export class AgentRuntime implements AgentExecutor {
           executed: false,
           suspension: { id: suspension.id, question: suspension.question },
         };
+        // The attempt is part of the run's history even though it did not run.
+        this.recordActionStep(spec, paused);
+        return paused;
       }
     }
 
@@ -350,13 +354,15 @@ export class AgentRuntime implements AgentExecutor {
         outcome.decision === "require_confirmation" && !this.approverConfigured
           ? " — no approver is configured, so it is denied; confirm interactively or opt in to auto-approval"
           : "";
-      return {
+      const blocked = {
         ok: false,
         error: `blocked (${outcome.decision})${reason}`,
         decision: outcome.decision,
         // Blocked, not failed: the caller can tell the two apart.
         executed: false,
       };
+      this.recordActionStep(spec, blocked);
+      return blocked;
     }
 
     const durationMs = Date.now() - startedAt;
@@ -382,6 +388,7 @@ export class AgentRuntime implements AgentExecutor {
       model: context?.model,
       cost: context?.cost,
     });
+    this.recordActionStep(spec, { ok: recorded.ok, error: recorded.error }, durationMs);
 
     return {
       ok: recorded.ok,
@@ -389,6 +396,24 @@ export class AgentRuntime implements AgentExecutor {
       output: recorded.output,
       decision: outcome.decision,
     };
+  }
+
+  /**
+   * Record one attempted call as a typed memory step (`src/steps.ts`).
+   *
+   * Every call the loop makes lands here — including the ones the gate blocked or
+   * paused — because the history is of *attempts*, not only successes. A failure
+   * is the one case that also sets `error`; the consumers of reliability
+   * telemetry still learn only from calls that actually ran.
+   */
+  private recordActionStep(
+    spec: ToolSpec,
+    result: ToolExecutionResult,
+    durationMs?: number,
+  ): void {
+    const store = this.adaptive.memory;
+    if (!store.recordStep) return;
+    store.recordStep(actionStep({ sessionId: this.sessionId(), tool: spec.name, result, durationMs }));
   }
 
   /**

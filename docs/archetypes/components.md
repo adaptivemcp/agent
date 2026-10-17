@@ -182,9 +182,16 @@ _when_ a plan step is produced.
 **Failure mode prevented.** A memory that is only raw prose, so nothing can be
 compiled from it, and a plan that is generated once and never revisited.
 
-**Our coverage.** 🟡 — we persist execution **events** and a graph
-(`MemoryStore`, `MetricCells`, `execution_nodes`), which is arguably richer than
-typed steps, but there is no _planning_ record at all and no per-step task text.
+**Our coverage.** ✅ — the shapes live in `spec` (`Task`, `ActionStep`, `PlanStep`,
+one `StepRecord` union) and `memory` persists them in one history a host reads back
+in order (`recordStep`/`getSteps`), beside the execution **events** and graph
+(`MetricCells`, `execution_nodes`) it already kept. The host records an
+**action step** for every attempted call (`AgentRuntime.execute`), and
+`--plan-interval <n>` (off by default) adds the **planning pass** (`src/steps.ts`):
+a plan is asked for from the _recorded_ state, stored as a plan step, and injected
+for the step that follows, so a plan is durable rather than said once. `/steps`
+renders the merged history, and a plan that cannot be produced is reported and
+skipped, never fatal.
 
 ---
 

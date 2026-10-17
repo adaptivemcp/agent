@@ -121,6 +121,15 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
     }
     out.mode = value;
   }
+  if (doc.planInterval !== undefined) {
+    const value = doc.planInterval;
+    // Mirrors the flag: a whole number of steps, at least one. Off is *absent*,
+    // not zero, so "0" is a typo rather than a silent no-op.
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+      throw new Error(`config "${path}": "planInterval" expects a whole number of steps >= 1`);
+    }
+    out.planInterval = value;
+  }
   if (doc.system1Backend !== undefined) {
     const value = doc.system1Backend;
     // Mirrors the flag: one tier stays a string, a comma list (or YAML list)
@@ -152,6 +161,7 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
     "defaultRisk",
     "system1Backend",
     "mode",
+    "planInterval",
     ...STRING_KEYS,
     ...NUMBER_KEYS,
     ...BOOLEAN_KEYS,

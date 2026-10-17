@@ -48,6 +48,7 @@ import {
 } from "./skills.js";
 import { tasksPrompt, tasksToolset } from "./tasks.js";
 import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
+import { PlanningPass, formatSteps } from "./steps.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -363,6 +364,22 @@ async function main(): Promise<void> {
     });
     // Now that the runtime exists, the task tools can reach its store.
     activeStore = runtime.adaptive.memory;
+    // A planning pass reads the recorded state and records its plan, so it is
+    // built here, next to the store it uses (the tools read it lazily, and so
+    // does this). It never fails a run: a pass that cannot plan is reported and
+    // the step proceeds unplanned.
+    const planner = args.planInterval
+      ? new PlanningPass({
+          model: defaultModel,
+          session: sessionId,
+          store: () => activeStore,
+          interval: args.planInterval,
+          onError: (error) => {
+            const detail = error instanceof Error ? error.message : String(error);
+            console.error(`warning: planning pass skipped (${detail})`);
+          },
+        })
+      : undefined;
     // A background child announces its result through the runtime's queue, so it
     // arrives as a steering message on the parent's next step — the parent is
     // never asked to poll.
@@ -468,6 +485,10 @@ async function main(): Promise<void> {
         args.mode === "tasks"
           ? tasksStopGuard({ session: sessionId, store: () => activeStore })
           : undefined,
+      // A planning pass is off unless `--plan-interval` says how often to re-plan.
+      // It is asked of the run's own model, and reads the *recorded* state, so a
+      // plan survives a restart and costs a bounded prompt however long the run got.
+      steer: planner?.steer,
     });
 
     // `--yes` is the only way to auto-approve in a non-interactive run; without
@@ -505,8 +526,10 @@ async function main(): Promise<void> {
             ...runConfig,
             executor: child,
             // A child is not the leader: the parent's board must not decide when a
-            // child may stop (and the child is not given the tasks tools anyway).
+            // child may stop (and the child is not given the tasks tools anyway),
+            // and the parent's planning pass reads the parent's session.
             stopGuard: undefined,
+            steer: undefined,
             // What this child may use: the parent's tools, narrowed by its
             // definition (never widened by it).
             tools: context.tools,
@@ -578,6 +601,8 @@ async function main(): Promise<void> {
           : undefined,
         metadata: () => runtime.toolsMetadata(),
         graph: () => runtime.graphView(),
+        // The typed history the planning pass reads and writes (steps.ts).
+        steps: () => formatSteps(activeStore?.getSteps?.(sessionId) ?? []),
         models: () => catalog.describe(),
         decodingFor: (tool) => {
           const recommendation = runtime.suggestDecoding(tool, runConfig.capabilities, {

@@ -11,6 +11,7 @@ import type {
   DecodingProvider,
   ExecutionContext,
   ModelSelector,
+  Steerer,
   StopGuard,
   ToolCall,
   ToolSpec,
@@ -51,6 +52,11 @@ export interface RunAgentOptions {
    * is reported `completed`: return a message to keep going (see `StopGuard`).
    */
   stopGuard?: StopGuard;
+  /**
+   * Optional pre-step hook: return a message to inject as a user turn before the
+   * step's model call (see `Steerer` — the planning pass uses it).
+   */
+  steer?: Steerer;
   onEvent?: AgentEventListener;
 }
 
@@ -140,6 +146,15 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentRunResult
   }
 
   for (let step = 0; step < maxSteps; step += 1) {
+    // Pre-step guidance first: a host that has something the model should *have*
+    // (a fresh plan, a board) injects it before the decision layer and the model
+    // call, so both see it.
+    const steered = await options.steer?.({ step, messages });
+    if (steered) {
+      emit({ type: "guard", message: steered, step });
+      messages.push({ role: "user", content: steered });
+    }
+
     // Fast decision layer first (System One), then the slower router, then the
     // loop's defaults. A decision's tools replace the full tool set for this
     // step, which is how intent steering narrows what the model can call.

@@ -143,6 +143,19 @@ class PricedToolModel implements ChatModel {
   }
 }
 
+/** A model that answers with one fixed text and remembers every turn it saw. */
+class ObservingModel implements ChatModel {
+  readonly name = "observing";
+  readonly turns: ChatMessage[][] = [];
+
+  constructor(private readonly text: string) {}
+
+  async step(messages: ChatMessage[]): Promise<ChatStep> {
+    this.turns.push([...messages]);
+    return { text: this.text, toolCalls: [], finishReason: "stop" };
+  }
+}
+
 describe("agent loop", () => {
   it("executes a tool call, records telemetry, and completes", async () => {
     const tools = toolset();
@@ -167,6 +180,40 @@ describe("agent loop", () => {
     const record = runtime.adaptive.memory.getTool("deploy_service", "demo");
     expect(record?.stats.invocations).toBe(1);
     expect(runtime.toolsMetadata()).toContain("deploy_service");
+
+    runtime.close();
+    await tools.close();
+  });
+
+  it("injects pre-step guidance before the model is asked", async () => {
+    const tools = toolset();
+    const runtime = await runtimeFor(tools, "s-steer");
+    const events: AgentEvent[] = [];
+    const model = new ObservingModel("done");
+    const asked: number[] = [];
+
+    const result = await runAgent({
+      model,
+      tools: [],
+      executor: runtime,
+      messages: [{ role: "user", content: "go" }],
+      maxSteps: 3,
+      steer: ({ step }) => {
+        asked.push(step);
+        return step === 0 ? "the plan: do it in two parts" : undefined;
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(asked).toEqual([0]);
+    expect(result.steps).toBe(1);
+    // The guidance was in the very first request, not appended after an answer.
+    const first = model.turns[0] ?? [];
+    expect(
+      first.some((message) => message.role === "user" && message.content.includes("two parts")),
+    ).toBe(true);
+    // And it is emitted, so a one-shot run shows what the host put in front of it.
+    expect(events.some((event) => event.type === "guard")).toBe(true);
 
     runtime.close();
     await tools.close();

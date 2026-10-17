@@ -175,6 +175,22 @@ consulted when the model stops calling tools. That guard is what makes "loop unt
 the plan is done" a fact rather than a request; a delegated child deliberately does
 not inherit it, because a child is not the leader and cannot see the leader's list.
 
+**Typed memory steps** (`src/steps.ts`) are the history a run leaves, in the shape
+`spec` fixes (`Task`/`ActionStep`/`PlanStep`, one replayable read) and `memory`
+persists. The runtime records an `ActionStep` for **every attempted call** — a gate
+refusal or a pause is recorded as an attempt with the reason in its summary and no
+`error`, because the tool never ran and the learned reliability signal must not see
+a failure — which is why history reads "what was done" rather than "what telemetry
+happened to capture". `--plan-interval <n>` (off unless set) adds a **planning
+pass**: before step 1 and every `n` steps after it, the run's model is asked for a
+short plan from the **recorded** state (the task list, the action steps, the
+previous plan) rather than from the conversation, the plan is stored as a
+`PlanStep`, and it is injected as a turn the model can act on. A pass that cannot
+plan is reported (`warning: planning pass skipped (…)`) and the step proceeds
+unplanned; a delegated child never plans. The loop seam is `steer`
+(`RunAgentOptions.steer`, the pre-step mirror of `review`), and `/steps` renders
+the merged history.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:
