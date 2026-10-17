@@ -41,6 +41,46 @@ function runCli(args: string[]): Promise<CliRun> {
   });
 }
 
+/**
+ * Drives the interactive REPL: `send` is written once the child's output reaches
+ * `after`.
+ *
+ * It has to be answer-driven rather than a single stdin dump — the REPL reads each
+ * line with `readline.question`, so a line typed while no prompt is pending is
+ * dropped, and dumping the whole script up front would run only the first line. The
+ * matching buffer is consumed as it goes, so the same marker (the `you> ` prompt)
+ * can be waited for once per turn.
+ */
+function runReplCli(
+  args: string[],
+  script: Array<{ after: string; send: string }>,
+): Promise<CliRun> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], { cwd: root });
+    let stdout = "";
+    let unmatched = "";
+    let stderr = "";
+    const pending = [...script];
+    const answerOutput = () => {
+      const step = pending[0];
+      if (!step) return;
+      const at = unmatched.indexOf(step.after);
+      if (at < 0) return;
+      unmatched = unmatched.slice(at + step.after.length);
+      pending.shift();
+      child.stdin.write(step.send);
+      answerOutput();
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      unmatched += chunk.toString();
+      answerOutput();
+    });
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
 /** The JSON `--server` form, so a test can set per-server env (the fixture's delay). */
 function serverSpec(env: Record<string, string> = {}): string {
   return JSON.stringify({
@@ -336,6 +376,74 @@ describe("cli, end to end and offline", () => {
     const history = store.getSteps?.("cli-e2e-plan") ?? [];
     store.close();
     expect(history.map((step) => step.kind)).toEqual(["plan", "action", "plan"]);
+
+    rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("runs the same run policy in the REPL, and reports what planning cost there", async () => {
+    // The REPL hand-picked the options it gave the loop, so `--plan-interval` did
+    // nothing interactively while working in a one-shot run. This drives the real
+    // REPL over stdin: the plan has to reach the model, land in the history, and
+    // show up in `/steps` with what it cost (#73) — a planning call is invisible to
+    // telemetry, so the REPL has nowhere else to say it.
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-repl-"));
+    const db = join(dir, "agent.db");
+    model = new StubModelServer({
+      respond: (request) => {
+        const isPlanning = request.messages.some(
+          (message) =>
+            message.role === "system" && (message.content ?? "").includes("planning pass"),
+        );
+        if (isPlanning) return { text: JSON.stringify({ steps: ["echo something"] }) };
+        const answered = request.messages.some((message) => message.role === "tool");
+        return answered
+          ? { text: "done" }
+          : { toolName: "fixture_fixture_echo", toolInput: { text: "hi" } };
+      },
+    });
+    const baseUrl = await model.start();
+
+    const run = await runReplCli(
+      [
+        "--plan-interval",
+        "1",
+        "--server",
+        serverSpec(),
+        "--base-url",
+        baseUrl,
+        "--api-key",
+        "test-key",
+        "--no-ollama",
+        "--no-stream",
+        "--db",
+        db,
+        "--session",
+        "cli-e2e-repl-steps",
+        "--max-steps",
+        "4",
+      ],
+      [
+        { after: "you> ", send: "echo something\n" },
+        // The turn is over when its prompt comes back; then read the history back.
+        { after: "you> ", send: "/steps\n" },
+        { after: "planning: plans=", send: "/exit\n" },
+      ],
+    );
+
+    expect(run.code).toBe(0);
+    // The history it read back: the plan, the call it led to, and the re-plan.
+    expect(run.stdout).toContain("plan   plan-1: echo something");
+    expect(run.stdout).toContain("action");
+    // And what the planning cost, which nothing else in a REPL session reports.
+    expect(run.stdout).toContain("planning: plans=");
+
+    // The planning request went to the model from the REPL, not only from a one-shot.
+    const planningRequests = model.requests.filter((request) =>
+      request.messages.some(
+        (message) => message.role === "system" && (message.content ?? "").includes("planning pass"),
+      ),
+    );
+    expect(planningRequests.length).toBeGreaterThan(0);
 
     rmSync(dir, { recursive: true, force: true });
   }, 30_000);

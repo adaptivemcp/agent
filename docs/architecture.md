@@ -79,7 +79,13 @@ a protocol concept.
 | **Typed steps**  | `src/steps.ts`      | One typed history per session: an `ActionStep` for every attempted call (a gate refusal or a pause is an attempt, not a failure), and — with `--plan-interval <n>`, off by default — a **planning pass** that records a `PlanStep` asked for from the _recorded_ state and injects it for the step that follows. `/steps` renders tasks, actions and plans in order.                                                                                |
 
 All of these are opt-in, so a host that enables none behaves exactly as it did
-before. Modes and the planning pass are the entries that are not toolsets, because
+before. A host must therefore **forward the loop's options rather than re-list the
+ones it happens to know**: the REPL did the latter and silently dropped `steer` and
+`stopGuard`, so `--plan-interval` planned nothing and a `tasks`-mode turn could end
+with its list unfinished — working in a one-shot run and doing nothing
+interactively. `ReplOptions` now extends the loop's options, so a new seam is
+forwarded by default and omitting one has to be written down.
+Modes and the planning pass are the entries that are not toolsets, because
 each is policy about a _step_ rather than a capability the model calls:
 `tasks` reaches into the loop with `RunAgentOptions.stopGuard` (`src/agent/loop.ts`)
 — consulted when the model stops calling tools, so a run cannot end while its list

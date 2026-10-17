@@ -201,6 +201,14 @@ summary is where it is accounted for (`plans=… plan_tokens=… plan_ms=…`, v
 `PlanningPassOptions.onCall` → `PlanUsage`), with a `planning:` line on `/steps`
 for the REPL (#73).
 
+**The REPL is the same host** (`src/repl.ts`): it hands the loop its options
+wholesale (`ReplOptions` extends the loop's `RunAgentOptions`), so run policy
+applies interactively — `--mode tasks` holds a turn open until its list is done and
+`--plan-interval` re-plans here too. A host that re-lists the options it knows
+instead of forwarding them silently drops the next seam; that is exactly how
+`steer`/`stopGuard` went missing here, working in a one-shot run and doing nothing
+interactively.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

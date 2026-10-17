@@ -68,9 +68,15 @@ Defaults (each overridable by a flag or an `AI_*` env var):
 In the REPL, type a message and press Enter. Assistant text streams as it is
 generated; tool calls and results print underneath. Commands: `/tools`,
 `/models`, `/graph` (the per-turn execution DAG), `/steps` (this session's typed
-history — tasks, actions, plans), `/metadata`, `/cost`,
+history — tasks, actions, plans — plus what planning cost), `/metadata`, `/cost`,
 `/policy`, `/drift`, `/retrieve [hash]`, `/decoding <tool>`, `/decoding-report`,
 `/decision` (the last System One decision), `/reset`, `/exit`.
+
+The REPL is the same host as a one-shot run, so run policy applies interactively
+too: `--mode tasks` holds a turn open until its list is done, and `--plan-interval`
+re-plans here exactly as it does there. (It hands the loop its options wholesale,
+so a new seam cannot be dropped by omission — that is how `--plan-interval` used to
+do nothing at all in the REPL.)
 
 - **Approvals.** Tools the gate marks `require_confirmation` — high-risk from the
   server's standard MCP annotations, or learned-flaky — prompt
