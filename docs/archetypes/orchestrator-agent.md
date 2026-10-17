@@ -125,16 +125,16 @@ modules), or when different parts need different tools/permissions.
 
 ## Our coverage
 
-| Component                            | Status | Evidence                                                                                                                              |
-| ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Delegation tool                      | ✅     | `delegation.ts`: a `task` tool with `description`/`prompt`/`agent`/`background`, exposed under `--task`                               |
-| Sub-agent session isolation          | ✅     | the child gets its own `<parent>/task[-<agent>]-<n>` session and returns a result, never its transcript                               |
-| Derived permissions                  | ✅     | a child never auto-approves, never gets `task`, and a named agent's `tools`/`deny` is intersected with the parent's (`narrowTools`) — narrowing only, by construction |
-| Foreground / background              | ✅     | foreground blocks; background returns immediately and reports once via `queueMessage` (bounded concurrency)                           |
-| Shared task list                     | ❌     | —                                                                                                                                     |
-| Orchestration modes                  | ❌     | —                                                                                                                                     |
-| Aggregation / budget across children | 🟡     | a child's store, gate and per-call budgets are shared; no total budget or fan-out cap across children                                 |
-| Learned cross-tool sequences         | 🟡     | `learnedProcedure()` _notices_ a repeated sequence; it cannot delegate itself                                                         |
+| Component                            | Status | Evidence                                                                                                                                                                                                        |
+| ------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Delegation tool                      | ✅     | `delegation.ts`: a `task` tool with `description`/`prompt`/`agent`/`background`, exposed under `--task`                                                                                                         |
+| Sub-agent session isolation          | ✅     | the child gets its own `<parent>/task[-<agent>]-<n>` session and returns a result, never its transcript                                                                                                         |
+| Derived permissions                  | ✅     | a child never auto-approves, never gets `task`, and a named agent's `tools`/`deny` is intersected with the parent's (`narrowTools`) — narrowing only, by construction                                           |
+| Foreground / background              | ✅     | foreground blocks; background returns immediately and reports once via `queueMessage` (bounded concurrency)                                                                                                     |
+| Shared task list                     | ✅     | `tasks.ts`: `tasks_create`/`tasks_list`/`tasks_update` under `--tasks`, over the `spec` `Task` that `memory` persists; `readyTasks` does the ordering, and an unknown dependency id blocks rather than unblocks |
+| Orchestration modes                  | ❌     | —                                                                                                                                                                                                               |
+| Aggregation / budget across children | 🟡     | a child's store, gate and per-call budgets are shared; no total budget or fan-out cap across children                                                                                                           |
+| Learned cross-tool sequences         | 🟡     | `learnedProcedure()` _notices_ a repeated sequence; it cannot delegate itself                                                                                                                                   |
 
 What we have beyond that is **observation** of orchestration-shaped behaviour: the
 execution graph (`agent_turn_<n>`) records a step's tool calls as a DAG — and a
@@ -143,8 +143,8 @@ tree is visible in the graph rather than lost.
 
 ## Gap
 
-Orchestration is the largest missing capability, and it decomposes into two
-independent halves:
+Orchestration was the largest gap, and it decomposes into three pieces — two of
+them now done:
 
 1. **Delegation** — a `task`-shaped tool, an isolated child session, derived
    (narrowed) permissions, and a foreground/background contract with notification.
@@ -152,12 +152,17 @@ independent halves:
    foreground/background contract, the anti-escalation rule, and named agents — a
    skill whose frontmatter declares `tools`/`deny` is an agent definition, and the
    child gets the intersection of its parent's tools and that policy.
-2. **A shared task list** — the `Task`/`TaskList` model with dependencies, plus the
-   named orchestration modes, so the leader has something to plan against. Open
-   (#37, #39).
+2. **A shared task list** — the `Task`/`TaskList` model with dependencies.
+   **Done** (`src/tasks.ts`, #37): `tasks_create`/`tasks_list`/`tasks_update` under
+   `--tasks`, over the `spec` `Task` that `memory` persists, with the dependency
+   read (`readyTasks`) deciding what may start.
+3. **Named orchestration modes** — `coordinate`/`route`/`broadcast`/`tasks`, so the
+   leader does not have to guess the coordination pattern. Open (#37).
 
-Ordering note: (1) is usable on its own (one-shot delegation), and is now. (2) is
-what makes multi-step orchestration legible, and a _background child that asks for
-approval_ is still exactly the problem pause/resume solves — today such a child
-**denies** the call (fail closed) rather than suspending, because the host half of
-pause/resume is blocked on the library release (agent #46).
+Ordering note: (1) and (2) are usable on their own — one-shot delegation, and a
+list the leader can plan against — and both are now. (3) is what turns the
+coordination pattern into an explicit choice rather than an emergent one. Where
+(1) and (2) meet, one rule still bites: a child that hits a `require_confirmation`
+call **denies** it rather than suspending — a child must not amplify authority, and
+a suspension belongs to the run a human is watching (agent #46 solved that for the
+parent).
