@@ -159,6 +159,22 @@ is confined to the skill's own directory — real paths are resolved, so a symli
 refused, not followed — and a malformed `SKILL.md` is warned about and skipped rather
 than failing the run.
 
+**Skill trust** (`src/skill-trust.ts`) decides whether a skill is offered at all, which
+is the control that matters for the real threat: a `SKILL.md` is instructions the model
+obeys. An untrusted skill is **neither listed in the prompt nor readable** — the listing
+is itself a foothold, since names and descriptions are injected for every skill — so
+unvetted text never enters the context window. Trust is _declared by the operator, never
+by the skill_ (a malicious `SKILL.md` would simply claim to be trusted), so the record
+lives outside it, in `$XDG_CONFIG_HOME/agent/skills.trust.json`, keyed by the skill's
+**content hash**: "I reviewed this" is worth nothing if the bytes can change underneath
+the review. The operator's own trees are trusted by default — `--skills`, the project's
+`./skills`, the user-level shelf; nothing arrives without them putting it there — a
+directory they got elsewhere is named with `--skills-untrusted`, and a **blocked**
+verdict refuses a skill whatever else says. `--skills-trust <name>` vouches for one by
+recording its hash, and `--skills-list` prints the discovered skills with their level,
+hash and status. A scan (a separate, out-of-band step) is what turns "unvetted" into a
+recorded verdict — the runtime never fetches and never scans.
+
 **Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
 sub-agent that runs in its own session and returns only its result. Two rules
 bound it — the child never auto-approves (delegation must not amplify authority)

@@ -92,6 +92,16 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
       out.skills = value as string[];
     else throw new Error(`config "${path}": "skills" must be a string or a list of strings`);
   }
+  if (doc.skillsUntrusted !== undefined) {
+    const value = doc.skillsUntrusted;
+    if (typeof value === "string") out.skillsUntrusted = [value];
+    else if (Array.isArray(value) && value.every((s) => typeof s === "string"))
+      out.skillsUntrusted = value as string[];
+    else
+      throw new Error(
+        `config "${path}": "skillsUntrusted" must be a string or a list of strings`,
+      );
+  }
   for (const key of NUMBER_KEYS) {
     const value = doc[key];
     if (value === undefined) continue;
@@ -158,6 +168,7 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
   const known = new Set<string>([
     "servers",
     "skills",
+    "skillsUntrusted",
     "defaultRisk",
     "system1Backend",
     "mode",

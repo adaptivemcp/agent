@@ -88,6 +88,22 @@ skill; "read a file" is a tool.
   own permissions — or the reverse, a procedure that has to run in the caller's
   context when it needed isolation.
 
+### Trust and containment
+
+- **Purpose.** Decide whether a skill's instructions may enter the model's context at
+  all, and bound what reading one can reach.
+- **Contract (sketch).** Containment: resolve real paths and refuse anything that is
+  not a regular file inside the skill's own directory. Trust: declared by the operator
+  (never by the skill — a hostile `SKILL.md` would simply claim to be trusted), keyed
+  by the skill's content hash, with a scan verdict able to refuse a skill regardless.
+- **Reference.** `opencode`'s discovery service trusts a publisher-declared `version`
+  string and downloads over HTTPS — the weakest useful model; `llama.cpp` ships skills
+  as local files and never fetches, so it has no trust model to get wrong. In this host
+  the untrusted case is a skill _copied_ in — a vendored or submoduled pack — which is
+  where both a hostile instruction and a symlink arrive.
+- **Failure mode prevented.** A hostile procedure entering the context window, and a
+  read escaping the skill's directory through a link.
+
 ## Our coverage
 
 | Component                                     | Status | Evidence                                                                                                        |
@@ -95,6 +111,7 @@ skill; "read a file" is a tool.
 | `SKILL.md` definition + trigger description   | ✅     | `src/skills.ts`: frontmatter `name`/`description`, the `description` used as the trigger                        |
 | Progressive disclosure                        | ✅     | the prompt carries names + descriptions only; the body loads through `skills_read_skill`, bundled files by name |
 | Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable), the `./skills` convention, and a user-level default; nothing remote             |
+| Trust and containment                          | ✅     | operator-declared and hash-keyed (`src/skill-trust.ts`); an untrusted skill is neither listed nor readable, and the read tool resolves real paths, refusing anything that is not a regular file inside the skill |
 | Supply chain (fetch / cache / version)        | ❌     | local directories only — nothing is fetched, so nothing needs signing                                           |
 | Invocation (context injection vs sub-session) | ✅     | both, explicitly: the body enters the current context via `skills_read_skill`, or the skill runs as an isolated sub-session when a `task` names it (`agent`), where its `tools`/`deny` narrows what that child may use |
 

@@ -58,6 +58,16 @@ describe("loadAgentConfig", () => {
     expect(() => loadAgentConfig(write("s3.yaml", "skills: 5"))).toThrow(/skills/);
   });
 
+  it("accepts skillsUntrusted as a string or a list", () => {
+    expect(loadAgentConfig(write("u.yaml", 'skillsUntrusted: "vendor"')).skillsUntrusted).toEqual([
+      "vendor",
+    ]);
+    expect(
+      loadAgentConfig(write("u2.yaml", "skillsUntrusted:\n  - a\n  - b")).skillsUntrusted,
+    ).toEqual(["a", "b"]);
+    expect(() => loadAgentConfig(write("u3.yaml", "skillsUntrusted: 5"))).toThrow(/skillsUntrusted/);
+  });
+
   it("treats an empty file as no options", () => {
     expect(loadAgentConfig(write("empty.yaml", ""))).toEqual({});
   });

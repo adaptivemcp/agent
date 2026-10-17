@@ -105,6 +105,12 @@ do nothing at all in the REPL.)
   large skill library costs almost nothing until it is used. A malformed `SKILL.md`
   is reported and skipped rather than failing the run, and the read tool cannot leave
   a skill's own directory — real paths are resolved, so a symlink out is refused.
+  A skill you got from somewhere else is kept out of the model's reach entirely:
+  name its directory with `--skills-untrusted` and it is neither listed in the
+  prompt nor readable, until you vouch for it (`--skills-trust <name>` records its
+  content hash in `$XDG_CONFIG_HOME/agent/skills.trust.json`) or a scan clears it.
+  `--skills-list` prints what was found, with each skill's level, hash and trust
+  status, and needs no MCP server.
 - **Delegation.** `--task` exposes a `task` tool: the model can hand a
   self-contained job to a **sub-agent** that runs in its own session and returns
   only its result — so a broad search or a long review cannot flood the caller's
