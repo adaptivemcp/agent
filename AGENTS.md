@@ -40,6 +40,7 @@ pnpm dev -- --config agent.yaml   # options from a file (flags override it)
 pnpm dev -- --help # CLI (tsx)
 pnpm release:prepare minor      # release, phase 1: version + notes + gates + build (no OTP)
 pnpm release:publish --otp CODE # release, phase 2: publish + commit + tag + notes (fast)
+pnpm skills:scan                # scan skills for known-malicious patterns; record the verdicts
 ```
 
 **Releasing is two phases, because they need different things.**
@@ -174,6 +175,19 @@ verdict refuses a skill whatever else says. `--skills-trust <name>` vouches for 
 recording its hash, and `--skills-list` prints the discovered skills with their level,
 hash and status. A scan (a separate, out-of-band step) is what turns "unvetted" into a
 recorded verdict — the runtime never fetches and never scans.
+
+**Scanning** (`src/skill-scan.ts` + `scripts/scan-skills.ts`, `pnpm skills:scan`) is
+that step. It turns the discovered skills into the document `cisco-ai-defense/mcp-scanner`
+reads (`static --resources`) and records the report as trust entries. `yara` is the
+keyless detection engine — note that `prompt_defense` is _not_ an analyzer (passing it
+does nothing) and that the scanner exits `0` even when it finds a threat, so the
+verdict lives in the report and nowhere else. Two things the integration learned the
+hard way: the scanner analyses the **URI** as well as the text, so targets carry a
+skill-relative path (an absolute `/tmp/...` URI is flagged as system manipulation on
+perfectly ordinary text, and it leaks the machine's layout), and a file the report never
+mentions is **not** cleared — absence of a finding is not a finding of absence. A clean
+scan is recorded as exactly that: a pattern scan found nothing, which is not the same
+as safe.
 
 **Delegation** (`src/delegation.ts`) is a `task` tool, off unless `--task`: a
 sub-agent that runs in its own session and returns only its result. Two rules
