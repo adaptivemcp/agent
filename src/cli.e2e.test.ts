@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,13 +29,46 @@ interface CliRun {
   stderr: string;
 }
 
+/**
+ * Every CLI child still alive, so the teardown below can reach it.
+ *
+ * A REPL child blocks on stdin and the MCP server it spawns is a grandchild: on a
+ * test timeout (or a vitest worker torn down mid-run) both were reparented to
+ * systemd and hung for hours, waiting for a prompt nobody would answer. Owning
+ * them here means a failure cleans up after itself.
+ */
+const running = new Set<ChildProcess>();
+
+/**
+ * Spawn the CLI in its own process group, so killing it takes its MCP server too.
+ * `detached` only makes the group; stdio stays piped, so nothing leaks to the
+ * terminal and the child is not reaped by the parent exiting.
+ */
+function spawnCli(args: string[], env: Record<string, string> = {}) {
+  const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], {
+    cwd: root,
+    env: { ...process.env, ...env },
+    detached: true,
+  });
+  running.add(child);
+  child.on("close", () => running.delete(child));
+  return child;
+}
+
+/** Kill a child and everything it started (the negative pid is its group). */
+function killTree(child: ChildProcess): void {
+  if (child.pid === undefined || child.exitCode !== null) return;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
 /** Run the real CLI as a child process, the way a user would. */
 function runCli(args: string[], env: Record<string, string> = {}): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], {
-      cwd: root,
-      env: { ...process.env, ...env },
-    });
+    const child = spawnCli(args, env);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
@@ -59,7 +92,7 @@ function runReplCli(
   script: Array<{ after: string; send: string }>,
 ): Promise<CliRun> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [TSX, "src/cli.ts", ...args], { cwd: root });
+    const child = spawnCli(args);
     let stdout = "";
     let unmatched = "";
     let stderr = "";
@@ -97,8 +130,18 @@ function serverSpec(env: Record<string, string> = {}): string {
 let model: StubModelServer | undefined;
 
 afterEach(async () => {
+  // A child that outlived its test is exactly the leak this teardown exists for:
+  // kill the group of anything still running before dropping the model server.
+  for (const child of running) killTree(child);
+  running.clear();
   await model?.stop();
   model = undefined;
+});
+
+// Belt and braces: if the worker exits without running the teardown, take the
+// children with it rather than leaving them to systemd.
+process.on("exit", () => {
+  for (const child of running) killTree(child);
 });
 
 describe("cli, end to end and offline", () => {
