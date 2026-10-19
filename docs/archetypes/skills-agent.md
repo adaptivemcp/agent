@@ -73,6 +73,11 @@ skill; "read a file" is a tool.
   installed `impeccable` skill.
 - **Failure mode prevented.** Re-downloading (or worse, executing) remote content
   on every run.
+- **Our position.** Deliberately **not built**. This host searches directories the
+  operator supplies and shares by declaration — a submodule, a symlink, an npm
+  package — because fetching would make content arrive without the act that the
+  declared-trust default rests on. Reasoning, alternatives, and the conditions that
+  would change the answer: [ADR-004](../adr/004-skill-supply-chain.md).
 
 ### Invocation and the skill/tool boundary
 
@@ -113,8 +118,8 @@ skill; "read a file" is a tool.
 | `SKILL.md` definition + trigger description   | ✅     | `src/skills.ts`: frontmatter `name`/`description`, the `description` used as the trigger                        |
 | Progressive disclosure                        | ✅     | the prompt carries names + descriptions only; the body loads through `skills_read_skill`, bundled files by name |
 | Discovery (user / project / remote)           | 🟡     | `--skills <dir>` (repeatable), the `./skills` convention, and a user-level default; nothing remote             |
-| Trust and containment                          | ✅     | operator-declared and hash-keyed (`src/skill-trust.ts`); an untrusted skill is neither listed nor readable, and the read tool resolves real paths, refusing anything that is not a regular file inside the skill. Scanning is out of band (`src/skill-scan.ts`, `pnpm skills:scan`) and a flag blocks regardless |
-| Supply chain (fetch / cache / version)        | ❌     | local directories only — nothing is fetched, so nothing needs signing                                           |
+| Trust and containment                         | ✅     | operator-declared and hash-keyed (`src/skill-trust.ts`); an untrusted skill is neither listed nor readable, and the read tool resolves real paths, refusing anything that is not a regular file inside the skill. Scanning is out of band (`src/skill-scan.ts`, `pnpm skills:scan`) and a flag blocks regardless |
+| Supply chain (fetch / cache / version)        | ❌     | deliberately absent: sharing is by declaration (submodule / symlink / npm package), not by fetch ([ADR-004](../adr/004-skill-supply-chain.md)) |
 | Invocation (context injection vs sub-session) | ✅     | both, explicitly: the body enters the current context via `skills_read_skill`, or the skill runs as an isolated sub-session when a `task` names it (`agent`), where its `tools`/`deny` narrows what that child may use |
 
 The loader is deliberately outside the runtime: a skill set becomes an ordinary
@@ -137,8 +142,12 @@ Skills are a **document format plus a loader**, not a runtime:
    the body on selection; expose `reference/` only when the procedure asks.
    **Done:** the prompt lists names + descriptions, and `skills_read_skill` reads
    the body or one named bundled file.
-3. **Supply chain** — if we ever pull skills remotely, cache + version them, and
-   never execute anything at discovery time.
+3. **Supply chain** — **not built, on purpose.** This host shares by declaration,
+   not by fetch: a `git submodule`, a symlink, or an npm package that ends in a
+   directory `--skills` already reads. Fetching would make content arrive without
+   the operator act that the declared-trust default rests on.
+   [ADR-004](../adr/004-skill-supply-chain.md) records the options, the risk, and
+   what would change the answer.
 
 The invocation question (does a skill run _in_ the current context or as an
 isolated sub-session?) is the point where this archetype meets
