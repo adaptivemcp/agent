@@ -359,6 +359,10 @@ approve })`, `saveResumeState(messages)` and `resumeMessages(suspension)` —
 - A step's tool calls share one `agent_turn_<n>` execution-graph root
   (`AgentRuntime.runTurn`); deeper per-turn action nesting is future work.
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.
+- `docs/sdk-tiers.md` grades this host against the
+  [MCP SDK tiering requirements](https://modelcontextprotocol.io/community/sdk-tiers) —
+  we are not an SDK, so no tier is claimed, but the gaps (no `SECURITY.md`, no
+  roadmap, no `P0` labels, no conformance run) are stated there.
 - `docs/archetypes/` catalogues the components behind the five agent archetypes
   (tool, skills, sequential, human-in-the-loop, orchestrator) and where this host
   stands against them — the reference for prioritising new capability. Its gap
