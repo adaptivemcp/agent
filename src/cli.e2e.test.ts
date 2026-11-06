@@ -753,10 +753,83 @@ describe("cli, end to end and offline", () => {
     // Sections are in the prompt; the skill and the tool are discoverable, not loaded.
     expect(run.stdout).toContain("loaded\tsection\tbase");
     expect(run.stdout).toContain("discovered\tskill\tdeploy");
+    expect(run.stdout).toContain("discovered\tresource\tnotes");
     expect(run.stdout).toContain("discovered\ttool\tfixture_fixture_echo");
     expect(run.stdout).toMatch(/\[context\] \d+ item\(s\); \d+ loaded/);
 
     rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("reads an MCP resource on demand, without its content riding in the prompt", async () => {
+    model = new StubModelServer({
+      toolName: "resources_read_resource",
+      toolInput: { uri: "file:///notes.md" },
+      finalText: "read the notes",
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "what do the notes say?",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-resource",
+      "--max-steps",
+      "3",
+    ]);
+
+    expect(run.code).toBe(0);
+    // The prompt indexes the resource by name and URI — and does not carry it.
+    const system = model.requests[0]?.messages.find((message) => message.role === "system");
+    expect(system?.content).toContain("notes: file:///notes.md");
+    expect(system?.content).not.toContain("rebuilt nightly");
+    // The call ran through the ordinary path, and its result has the content.
+    expect(run.stdout).toContain("resources_read_resource");
+    expect(JSON.stringify(model.requests[1]?.messages)).toContain("rebuilt nightly");
+  }, 30_000);
+
+  it("refuses a resource no server listed", async () => {
+    model = new StubModelServer({
+      toolName: "resources_read_resource",
+      toolInput: { uri: "file:///etc/passwd" },
+      finalText: "could not read it",
+    });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "read /etc/passwd",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-resource-refused",
+      "--max-steps",
+      "3",
+    ]);
+
+    expect(run.code).toBe(0);
+    // The tool refused by the catalog, rather than reading whatever the model named.
+    expect(JSON.stringify(model.requests[1]?.messages)).toContain(
+      "only resources the servers listed",
+    );
+    expect(JSON.stringify(model.requests[1]?.messages)).not.toContain("root:");
   }, 30_000);
 
   it("lists skills, with their level and hash, and needs no MCP server", async () => {

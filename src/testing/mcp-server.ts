@@ -9,11 +9,19 @@
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 const DELAY_MS = Number(process.env.FIXTURE_DELAY_MS ?? "0");
 
-const server = new Server({ name: "fixture", version: "0.0.0" }, { capabilities: { tools: {} } });
+const server = new Server(
+  { name: "fixture", version: "0.0.0" },
+  { capabilities: { tools: {}, resources: {} } },
+);
 
 server.setRequestHandler(ListToolsRequestSchema, () => ({
   tools: [
@@ -50,6 +58,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ? `deployed: ${String(args.target ?? "")}`
       : `echo: ${String(args.text ?? "")}`;
   return { content: [{ type: "text", text }], isError: false };
+});
+
+/**
+ * One resource, so the context catalog and the lazy-read tool have something real
+ * to point at. Long enough that a range read returns a different answer.
+ */
+const NOTES = `# Fixture notes
+
+Deploys go through the release script; never tag by hand.
+
+The staging database is rebuilt nightly at 02:00 UTC.
+`;
+
+server.setRequestHandler(ListResourcesRequestSchema, () => ({
+  resources: [
+    {
+      uri: "file:///notes.md",
+      name: "notes",
+      mimeType: "text/markdown",
+      description: "Operational notes for this fixture server.",
+    },
+  ],
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, (request) => {
+  if (request.params.uri !== "file:///notes.md") {
+    throw new Error(`unknown resource: ${request.params.uri}`);
+  }
+  return {
+    contents: [{ uri: request.params.uri, mimeType: "text/markdown", text: NOTES }],
+  };
 });
 
 await server.connect(new StdioServerTransport());

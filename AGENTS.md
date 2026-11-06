@@ -261,6 +261,13 @@ round trip per server, so it only happens when the catalog is asked for — a on
 run never pays it. Per-item load tracking (a skill read at step 4) needs context
 telemetry and is deliberately not claimed yet; the listing would go stale.
 
+**MCP resources** (`src/resources.ts`) are the first context source that is external to
+the host: the servers list them, the prompt carries a one-line index (`name: uri`), and
+`resources_read_resource` reads one on demand, with `offset`/`limit` for a partial read.
+The read is confined to URIs the servers actually listed — a resource is untrusted
+server content, so the catalog is the boundary — and it goes through
+`AgentRuntime.execute`, taking the gate, telemetry and execution graph like any tool.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

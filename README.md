@@ -98,6 +98,10 @@ do nothing at all in the REPL.)
   `context=<n>tok(est)` — an estimate, never presented as usage. Selection,
   retrieval and retention are separate concerns and not built yet (ADR-005 in
   `adaptive-mcp`).
+- **Resources.** MCP resources the servers list are indexed in the prompt by name and
+  URI, and read on demand with `resources_read_resource` (`offset`/`limit` read part
+  of one). Only a URI a server actually listed can be read; the read is an ordinary
+  tool call, so the gate and telemetry apply.
 - **Learned context.** Before each turn the agent injects a compact summary of
   observed tool reliability/insights into the system prompt (progressive
   disclosure of evaluation output); `--no-context` disables it.
