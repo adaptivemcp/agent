@@ -253,6 +253,14 @@ _estimate_, labelled as one, because real usage only exists after the provider r
 attach; selection, retrieval and retention are deliberately separate and not built yet
 (ADR-005 in `adaptive-mcp`).
 
+**The context catalog** (`src/context-catalog.ts`) is the observability half:
+`--list-context` and the REPL's `/context` list every section that is in the prompt
+(`loaded`) plus the skills, MCP resources and tools the host knows about
+(`discovered`), with their source/level and estimated cost. Resource listing is a
+round trip per server, so it only happens when the catalog is asked for — a one-shot
+run never pays it. Per-item load tracking (a skill read at step 4) needs context
+telemetry and is deliberately not claimed yet; the listing would go stale.
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:

@@ -722,6 +722,36 @@ describe("cli, end to end and offline", () => {
     rmSync(configHome, { recursive: true, force: true });
   }, 30_000);
 
+  it("lists the context catalog: what is loaded, and what could be", async () => {
+    const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-context-"));
+    mkdirSync(join(skillsDir, "deploy"), { recursive: true });
+    writeFileSync(
+      join(skillsDir, "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Ship a service\n---\n\nGo.\n",
+    );
+
+    const run = await runCli([
+      "--list-context",
+      "--skills",
+      skillsDir,
+      "--server",
+      serverSpec(),
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-context",
+    ]);
+
+    expect(run.code).toBe(0);
+    // Sections are in the prompt; the skill and the tool are discoverable, not loaded.
+    expect(run.stdout).toContain("loaded\tsection\tbase");
+    expect(run.stdout).toContain("discovered\tskill\tdeploy");
+    expect(run.stdout).toContain("discovered\ttool\tfixture_fixture_echo");
+    expect(run.stdout).toMatch(/\[context\] \d+ item\(s\); \d+ loaded/);
+
+    rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
   it("lists skills, with their level and hash, and needs no MCP server", async () => {
     const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-"));
     const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-src-"));

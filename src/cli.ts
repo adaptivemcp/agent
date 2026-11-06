@@ -59,6 +59,7 @@ import { tasksPrompt, tasksToolset } from "./tasks.js";
 import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
 import { PlanningPass, PlanUsage, formatSteps } from "./steps.js";
 import { assembleContext, contextSummary, type ContextSection } from "./context.js";
+import { buildContextCatalog, formatContextCatalog } from "./context-catalog.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -378,6 +379,25 @@ async function main(): Promise<void> {
   try {
     const specs = await tools.listTools();
     parentSpecs = specs; // delegation narrows from this, at call time
+    // Resources are only listed when something asks for the catalog: the RPC costs
+    // a round trip per server, and a one-shot run has no use for it.
+    const gatherContextResources = async (): Promise<
+      Array<{ uri: string; name?: string; serverName?: string }>
+    > => {
+      const resources: Array<{ uri: string; name?: string; serverName?: string }> = [];
+      for (const toolset of toolsets) {
+        try {
+          for (const resource of await toolset.listResources()) {
+            resources.push({ ...resource, serverName: toolset.serverName });
+          }
+        } catch {
+          // A server that lists no resources is fine; a broken one must not stop the run.
+        }
+      }
+      return resources;
+    };
+    const catalogFor = (resources: Array<{ uri: string; name?: string; serverName?: string }>) =>
+      buildContextCatalog({ sections: context.sections, skills, resources, tools: specs });
     if (args.listTools) {
       for (const spec of specs) {
         console.log(`${spec.name}\t${spec.serverName ?? ""}\t${spec.description ?? ""}`);
@@ -560,6 +580,10 @@ async function main(): Promise<void> {
     }
     const context = assembleContext(contextSections);
     const systemWithServers = context.text;
+    if (args.listContext) {
+      console.log(formatContextCatalog(catalogFor(await gatherContextResources())));
+      return;
+    }
 
     // Server-governed policy: read each server's tools-metadata resource.
     if (args.serverPolicy) {
@@ -712,10 +736,14 @@ async function main(): Promise<void> {
 
     if (args.interactive || args.prompt === undefined) {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
+      // The REPL is interactive, so the catalog is built once when it starts; a
+      // resource listing is a round trip per server and nothing changes it mid-session.
+      const contextCatalog = catalogFor(await gatherContextResources());
       await runRepl({
         ...runConfig,
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
+        contextReport: () => formatContextCatalog(contextCatalog),
         decision: () => runtime.lastDecisionSummary(),
         cost: () => runtime.costSummary(),
         policy: () => runtime.serverPolicySummary(),

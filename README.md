@@ -91,6 +91,13 @@ do nothing at all in the REPL.)
   conversation it stopped in — the unresolved call simply runs, so the model is not
   asked to redo the turn (`--deny` refuses it instead). All three need `--db` and
   `--session`.
+- **Context catalog.** `--list-context` (one-shot) and the REPL's `/context` show
+  what the agent currently carries: the prompt sections that are loaded, plus the
+  skills, MCP resources and tools it could load, each with its source and an
+  estimated token cost. The run summary reports the prompt's size as
+  `context=<n>tok(est)` — an estimate, never presented as usage. Selection,
+  retrieval and retention are separate concerns and not built yet (ADR-005 in
+  `adaptive-mcp`).
 - **Learned context.** Before each turn the agent injects a compact summary of
   observed tool reliability/insights into the system prompt (progressive
   disclosure of evaluation output); `--no-context` disables it.
