@@ -874,6 +874,8 @@ describe("cli, end to end and offline", () => {
       "--tasks",
       "--context-budget",
       "20",
+      "--server",
+      serverSpec(),
       "--base-url",
       "http://127.0.0.1:1/v1",
       "--api-key",
