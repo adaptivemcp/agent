@@ -72,6 +72,23 @@ describe("loadAgentConfig", () => {
     expect(loadAgentConfig(write("empty.yaml", ""))).toEqual({});
   });
 
+  it("accepts contextBudget as an object of positive token caps", () => {
+    expect(
+      loadAgentConfig(write("b.yaml", "contextBudget:\n  total: 400\n  skills: 120")).contextBudget,
+    ).toBe(400);
+    expect(
+      loadAgentConfig(write("b2.yaml", "contextBudget:\n  total: 400\n  skills: 120"))
+        .contextBudgetPerKind,
+    ).toEqual({ skills: 120 });
+    expect(() => loadAgentConfig(write("b3.yaml", "contextBudget: 30"))).toThrow(/contextBudget/);
+    expect(() => loadAgentConfig(write("b4.yaml", "contextBudget:\n  total: -1"))).toThrow(
+      /positive whole number/,
+    );
+    expect(() => loadAgentConfig(write("b5.yaml", "contextBudget:\n  skils: 10"))).toThrow(
+      /unknown key "skils"/,
+    );
+  });
+
   it("rejects an unknown key instead of silently ignoring it", () => {
     expect(() => loadAgentConfig(write("typo.yaml", "modle: gpt-4o"))).toThrow(
       /unknown key "modle"/,

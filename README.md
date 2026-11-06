@@ -98,6 +98,11 @@ do nothing at all in the REPL.)
   `context=<n>tok(est)` — an estimate, never presented as usage. Selection,
   retrieval and retention are separate concerns and not built yet (ADR-005 in
   `adaptive-mcp`).
+- **Context budgets.** `--context-budget <tokens>` caps the assembled prompt, and
+  `--context-budget-skills|tasks|resources` cap one kind; the config file takes a
+  `contextBudget` object. Sections are dropped whole, lowest priority first, and the
+  run summary says so (`context_budget=`, `context_dropped=`) — a truncated skill
+  would be worse than none.
 - **Resources.** MCP resources the servers list are indexed in the prompt by name and
   URI, and read on demand with `resources_read_resource` (`offset`/`limit` read part
   of one). Only a URI a server actually listed can be read; the read is an ordinary

@@ -253,6 +253,14 @@ _estimate_, labelled as one, because real usage only exists after the provider r
 attach; selection, retrieval and retention are deliberately separate and not built yet
 (ADR-005 in `adaptive-mcp`).
 
+**Context budgets** are part of that assembly: `--context-budget <tokens>` caps the
+whole prompt, `--context-budget-skills|tasks|resources` cap one kind, and the config
+file takes a `contextBudget` object. Sections are removed **whole**, lowest priority
+first, and the cap is measured on the joined text so it matches what is printed. A
+section is never truncated: half a skill is worse than none, because the model cannot
+tell it is reading a fragment. The summary says what happened
+(`context_kinds=base:17,skills:60 context_budget=200 context_dropped=1`).
+
 **The context catalog** (`src/context-catalog.ts`) is the observability half:
 `--list-context` and the REPL's `/context` list every section that is in the prompt
 (`loaded`) plus the skills, MCP resources and tools the host knows about

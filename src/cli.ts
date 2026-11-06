@@ -578,7 +578,12 @@ async function main(): Promise<void> {
         reason: "the shared task list",
       });
     }
-    const context = assembleContext(contextSections);
+    const context = assembleContext(contextSections, {
+      budget:
+        args.contextBudget !== undefined || Object.keys(args.contextBudgetPerKind).length > 0
+          ? { total: args.contextBudget, perKind: args.contextBudgetPerKind }
+          : undefined,
+    });
     const systemWithServers = context.text;
     if (args.listContext) {
       console.log(formatContextCatalog(catalogFor()));
