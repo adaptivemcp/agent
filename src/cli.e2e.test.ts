@@ -736,6 +736,13 @@ describe("cli, end to end and offline", () => {
       skillsDir,
       "--server",
       serverSpec(),
+      // Listing needs no model call, but the CLI resolves a catalog before any
+      // command that talks to servers — give it a stub so CI needs no keys.
+      "--base-url",
+      "http://127.0.0.1:1/v1",
+      "--api-key",
+      "test-key",
+      "--no-ollama",
       "--db",
       ":memory:",
       "--session",
