@@ -70,6 +70,8 @@ export interface CliArgs {
   report: boolean;
   serverPolicy: boolean;
   listTools: boolean;
+  /** Print the context catalog (what could be loaded, and what already is) and exit. */
+  listContext: boolean;
   interactive: boolean;
   noStream: boolean;
   autoApprove: boolean;
@@ -151,6 +153,7 @@ const DEFAULT_ARGS: CliArgs = {
   skillsTrust: [],
   skillsList: false,
   listTools: false,
+  listContext: false,
   interactive: false,
   defaultRisk: "medium",
   awaitJobs: false,
@@ -279,6 +282,9 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
         break;
       case "--list-tools":
         args.listTools = true;
+        break;
+      case "--list-context":
+        args.listContext = true;
         break;
       case "--interactive":
       case "-i":
@@ -553,6 +559,7 @@ Options:
   --report                      Report observations to servers exposing report_observation
   --no-server-policy            Don't read/apply the server's tools-metadata policy
   --list-tools                  List discovered tools and exit
+  --list-context                List context items (loaded and discoverable) and exit
   -h, --help                    Show this help
   -V, --version                 Print the version and exit
 `;

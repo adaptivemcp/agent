@@ -50,6 +50,8 @@ export interface ReplOptions extends Omit<RunAgentOptions, "messages" | "onEvent
   graph?: () => string;
   /** Text for `/steps` (the session's typed memory steps, read back). */
   steps?: () => string;
+  /** Text for `/context` (what could be loaded, and what already is). */
+  contextReport?: () => string;
   /** Text for `/models` (the model catalog). */
   models?: () => string;
   /** Text for `/decision` (the last System One decision). */
@@ -147,6 +149,7 @@ export async function runRepl(options: ReplOptions): Promise<void> {
                 "  /models             list model integrations (Adaptive MCP picks per tool)\n" +
                 "  /graph              show this session's execution-graph DAG\n" +
                 "  /steps              show this session's tasks, actions and plans\n" +
+                "  /context            show what context is loaded and what could be loaded\n" +
                 "  /metadata           print the derived tools-metadata view\n" +
                 "  /cost               show recorded cost per tool\n" +
                 "  /policy             show the server-governed policy in effect\n" +
@@ -186,6 +189,11 @@ export async function runRepl(options: ReplOptions): Promise<void> {
             continue;
           case "/steps":
             output.write(options.steps ? `${options.steps()}\n` : color.dim("(no history)\n"));
+            continue;
+          case "/context":
+            output.write(
+              options.contextReport ? `${options.contextReport()}\n` : color.dim("(no catalog)\n"),
+            );
             continue;
           case "/policy":
             output.write(options.policy ? `${options.policy()}\n` : color.dim("(no policy)\n"));
