@@ -108,6 +108,17 @@ describe("context catalog", () => {
     expect(formatContextCatalog(catalogInput())).not.toContain("dropped by budget");
   });
 
+  it("echoes the run summary's own numbers when given them", () => {
+    const text = formatContextCatalog(catalogInput(), {
+      summary: "context=42tok(est) context_kinds=base:12,skills:30",
+    });
+
+    expect(text).toContain("[context] context=42tok(est) context_kinds=base:12,skills:30");
+    // The catalog footer still comes first, so the listing is unchanged for readers
+    // that never pass a summary.
+    expect(text.indexOf("item(s)")).toBeLessThan(text.indexOf("context_kinds"));
+  });
+
   it("says so when there is nothing to list", () => {
     const empty: ContextItem[] = [];
     expect(formatContextCatalog(empty)).toBe("[context] nothing discovered");

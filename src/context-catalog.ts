@@ -123,8 +123,15 @@ export function loadedContextTokens(items: ContextItem[]): number {
  * One line per item, tab-separated like `/tools`: `state  kind  name  source  cost`.
  * The footer totals what is actually loaded, which is the number a budget can act on,
  * and names anything the budget removed so a cap is never silent.
+ *
+ * `summary` appends the run summary's own line (`context=… context_kinds=…`), so the
+ * interactive view and the one-shot summary describe the same prompt instead of two
+ * near-identical ones.
  */
-export function formatContextCatalog(items: ContextItem[]): string {
+export function formatContextCatalog(
+  items: ContextItem[],
+  options: { summary?: string } = {},
+): string {
   if (items.length === 0) return "[context] nothing discovered";
   const lines = items.map((item) =>
     [item.state, item.kind, item.name, item.source, `${item.tokens}tok(est)`].join("\t"),
@@ -135,5 +142,6 @@ export function formatContextCatalog(items: ContextItem[]): string {
     `[context] ${items.length} item(s); ${loaded.length} loaded, ~${loadedContextTokens(items)}tok(est) in the prompt` +
       (dropped > 0 ? `; ${dropped} dropped by budget` : ""),
   );
+  if (options.summary) lines.push(`[context] ${options.summary}`);
   return lines.join("\n");
 }
