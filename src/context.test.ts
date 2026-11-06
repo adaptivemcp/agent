@@ -82,10 +82,75 @@ describe("context assembly", () => {
     expect(context.sections.reduce((sum, entry) => sum + entry.tokens, 0)).toBe(4);
   });
 
-  it("summarises an estimated total, and says nothing for an empty prompt", () => {
-    expect(contextSummary(assembleContext([section({ id: "a", text: "x".repeat(40) })]))).toBe(
-      " context=10tok(est)",
+  it("summarises the total, per-kind spend and the budget", () => {
+    const context = assembleContext(
+      [
+        section({ id: "base", kind: "base", text: "a".repeat(8), priority: 100 }),
+        section({ id: "skills", kind: "skills", text: "b".repeat(40), priority: 70 }),
+      ],
+      { budget: { total: 100 } },
+    );
+
+    expect(contextSummary(context)).toBe(
+      " context=13tok(est) context_kinds=base:2,skills:10 context_budget=100",
     );
     expect(contextSummary(assembleContext([]))).toBe("");
+  });
+
+  it("drops the lowest-priority sections of a kind until it fits its cap", () => {
+    const context = assembleContext(
+      [
+        section({ id: "base", kind: "base", text: "z".repeat(8), priority: 100 }),
+        section({ id: "s1", kind: "skills", text: "x".repeat(40), priority: 70 }),
+        section({ id: "s2", kind: "skills", text: "y".repeat(40), priority: 70 }),
+      ],
+      { budget: { perKind: { skills: 12 } } },
+    );
+
+    // Both skill sections together are 82 characters (~21 tokens); one fits.
+    expect(context.sections.map((entry) => entry.id)).toEqual(["base", "s1"]);
+    expect(context.dropped).toEqual([
+      { id: "s2", kind: "skills", tokens: 10, reason: "kind-budget" },
+    ]);
+    expect(contextSummary(context)).toContain("context_dropped=1");
+  });
+
+  it("drops the lowest-priority section when the total is exceeded", () => {
+    const context = assembleContext(
+      [
+        section({ id: "base", kind: "base", text: "a".repeat(40), priority: 100 }),
+        section({ id: "skills", kind: "skills", text: "c".repeat(40), priority: 70 }),
+        section({ id: "tasks", kind: "tasks", text: "b".repeat(40), priority: 60 }),
+      ],
+      { budget: { total: 25 } },
+    );
+
+    // All three are ~31 tokens; dropping the lowest priority (tasks) leaves ~21.
+    expect(context.sections.map((entry) => entry.id)).toEqual(["base", "skills"]);
+    expect(context.dropped).toEqual([
+      { id: "tasks", kind: "tasks", tokens: 10, reason: "total-budget" },
+    ]);
+    expect(context.tokens).toBeLessThanOrEqual(25);
+  });
+
+  it("drops a section that cannot fit the whole budget, rather than truncating it", () => {
+    // Half a skill is worse than none: the model cannot tell it is reading a fragment.
+    const context = assembleContext([section({ id: "base", text: "x".repeat(400) })], {
+      budget: { total: 10 },
+    });
+
+    expect(context.sections).toEqual([]);
+    expect(context.text).toBe("");
+    expect(context.dropped).toEqual([{ id: "base", kind: "base", tokens: 100, reason: "total-budget" }]);
+    expect(contextSummary(context)).toBe(
+      " context=0tok(est) context_budget=10 context_dropped=1",
+    );
+  });
+
+  it("removes nothing when no budget is set", () => {
+    const context = assembleContext([section({ id: "a" })]);
+
+    expect(context.dropped).toEqual([]);
+    expect(context.budget).toBeUndefined();
   });
 });

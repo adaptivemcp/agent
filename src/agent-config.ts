@@ -102,6 +102,32 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
         `config "${path}": "skillsUntrusted" must be a string or a list of strings`,
       );
   }
+  if (doc.contextBudget !== undefined) {
+    const value = doc.contextBudget;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error(`config "${path}": "contextBudget" must be an object`);
+    }
+    for (const [key, raw] of Object.entries(value)) {
+      if (raw === undefined) continue;
+      if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
+        throw new Error(
+          `config "${path}": "contextBudget.${key}" must be a positive whole number of tokens`,
+        );
+      }
+      if (key === "total") {
+        out.contextBudget = raw;
+        continue;
+      }
+      const kind =
+        key === "serverInstructions"
+          ? "server-instructions"
+          : key === "base" || key === "mode" || key === "skills" || key === "resources" || key === "tasks"
+            ? key
+            : undefined;
+      if (!kind) throw new Error(`config "${path}": "contextBudget" has unknown key "${key}"`);
+      (out.contextBudgetPerKind ??= {})[kind] = raw;
+    }
+  }
   for (const key of NUMBER_KEYS) {
     const value = doc[key];
     if (value === undefined) continue;
@@ -169,6 +195,7 @@ export function loadAgentConfig(path: string): Partial<CliArgs> {
     "servers",
     "skills",
     "skillsUntrusted",
+    "contextBudget",
     "defaultRisk",
     "system1Backend",
     "mode",

@@ -12,6 +12,7 @@ import {
   type DecisionBackend,
 } from "./decision/systemone.js";
 import { ORCHESTRATION_MODES, isOrchestrationMode, type OrchestrationMode } from "./modes.js";
+import type { ContextKind } from "./context.js";
 
 /** A System One decision tier selectable via `--system1-backend`. */
 export type System1Tier = "ollama" | "openai";
@@ -72,6 +73,10 @@ export interface CliArgs {
   listTools: boolean;
   /** Print the context catalog (what could be loaded, and what already is) and exit. */
   listContext: boolean;
+  /** Estimated-token cap for the whole assembled prompt (unset = unbounded). */
+  contextBudget?: number;
+  /** Per-kind estimated-token caps, e.g. `{ skills: 200 }`. */
+  contextBudgetPerKind: Partial<Record<ContextKind, number>>;
   interactive: boolean;
   noStream: boolean;
   autoApprove: boolean;
@@ -154,6 +159,7 @@ const DEFAULT_ARGS: CliArgs = {
   skillsList: false,
   listTools: false,
   listContext: false,
+  contextBudgetPerKind: {},
   interactive: false,
   defaultRisk: "medium",
   awaitJobs: false,
@@ -179,6 +185,15 @@ const DEFAULT_ARGS: CliArgs = {
  * Parse argv into only the options actually present, without applying the
  * defaults, so a config file can be merged underneath the flags (flags win).
  */
+/** A token budget from a flag: a positive whole number, or a usage error. */
+function budgetTokens(flag: string, value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} expects a positive whole number of tokens, got "${value ?? ""}"`);
+  }
+  return parsed;
+}
+
 export function parseFlags(argv: string[]): Partial<CliArgs> {
   const args: Partial<CliArgs> = {};
   for (let i = 0; i < argv.length; i += 1) {
@@ -286,6 +301,16 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
       case "--list-context":
         args.listContext = true;
         break;
+      case "--context-budget":
+        args.contextBudget = budgetTokens("--context-budget", next());
+        break;
+      case "--context-budget-skills":
+      case "--context-budget-tasks":
+      case "--context-budget-resources": {
+        const kind = flag.slice("--context-budget-".length);
+        (args.contextBudgetPerKind ??= {})[kind as ContextKind] = budgetTokens(flag, next());
+        break;
+      }
       case "--interactive":
       case "-i":
         args.interactive = true;
@@ -560,6 +585,8 @@ Options:
   --no-server-policy            Don't read/apply the server's tools-metadata policy
   --list-tools                  List discovered tools and exit
   --list-context                List context items (loaded and discoverable) and exit
+  --context-budget <tokens>     Cap the estimated size of the assembled prompt
+  --context-budget-skills <tokens>  Cap one section kind (also -tasks, -resources)
   -h, --help                    Show this help
   -V, --version                 Print the version and exit
 `;

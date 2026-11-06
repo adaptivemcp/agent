@@ -44,12 +44,34 @@ export interface AssembledSection {
   reason: string;
 }
 
+/**
+ * A cap on what the host will spend on context.
+ *
+ * `total` is the whole prompt; `perKind` caps one source. Both are estimates, like
+ * every other number here.
+ */
+export interface ContextBudget {
+  total?: number;
+  perKind?: Partial<Record<ContextKind, number>>;
+}
+
+/** A section the budget removed, and which cap removed it. */
+export interface DroppedSection {
+  id: string;
+  kind: ContextKind;
+  tokens: number;
+  reason: "kind-budget" | "total-budget";
+}
+
 export interface AssembledContext {
-  /** The prompt text: the sections joined by a blank line. */
+  /** The prompt text: the kept sections joined by a blank line. */
   text: string;
   /** Estimated tokens for the whole prompt (not the sum of rounded parts). */
   tokens: number;
   sections: AssembledSection[];
+  /** Sections the budget removed, in the order they were dropped. */
+  dropped: DroppedSection[];
+  budget?: ContextBudget;
 }
 
 /**
@@ -68,29 +90,90 @@ export function estimateTokens(text: string): number {
  *
  * Empty sections are dropped. Order is `priority` descending; equal priorities keep
  * declaration order, so a caller can insert a section without renumbering the rest.
+ *
+ * With a budget, sections are removed **whole**, lowest priority first: a per-kind cap
+ * trims the tail of that kind, then the total trims the tail of what is left. A
+ * section is never truncated mid-way — half a skill is worse than none, because the
+ * model cannot tell that it is reading a fragment. Everything removed is reported.
  */
-export function assembleContext(sections: ContextSection[]): AssembledContext {
+export function assembleContext(
+  sections: ContextSection[],
+  options: { budget?: ContextBudget } = {},
+): AssembledContext {
   const ordered = sections
     .map((section, index) => ({ section, index }))
     .filter(({ section }) => section.text !== "")
     .sort((a, b) => b.section.priority - a.section.priority || a.index - b.index)
     .map(({ section }) => section);
 
-  const text = ordered.map((section) => section.text).join("\n\n");
+  const budget = options.budget;
+  const removed = new Set<ContextSection>();
+  const dropped: DroppedSection[] = [];
+  const cost = (section: ContextSection): number => estimateTokens(section.text);
+  const drop = (section: ContextSection, reason: DroppedSection["reason"]): void => {
+    removed.add(section);
+    dropped.push({ id: section.id, kind: section.kind, tokens: cost(section), reason });
+  };
+
+  for (const [kind, cap] of Object.entries(budget?.perKind ?? {})) {
+    if (cap === undefined) continue;
+    // Whole sections only, and the cap is measured on the joined text so it matches
+    // the total the summary prints (separators included).
+    let members = ordered.filter((section) => section.kind === kind && !removed.has(section));
+    while (members.length > 0 && estimateTokens(members.map((s) => s.text).join("\n\n")) > cap) {
+      const section = members[members.length - 1]!;
+      drop(section, "kind-budget");
+      members = members.slice(0, -1);
+    }
+  }
+
+  if (budget?.total !== undefined) {
+    let kept = ordered.filter((section) => !removed.has(section));
+    while (kept.length > 0 && estimateTokens(kept.map((s) => s.text).join("\n\n")) > budget.total) {
+      const section = kept[kept.length - 1]!;
+      drop(section, "total-budget");
+      kept = kept.slice(0, -1);
+    }
+  }
+
+  const kept = ordered.filter((section) => !removed.has(section));
+  const text = kept.map((section) => section.text).join("\n\n");
   return {
     text,
     tokens: estimateTokens(text),
-    sections: ordered.map((section) => ({
+    sections: kept.map((section) => ({
       id: section.id,
       kind: section.kind,
       source: section.source,
       tokens: estimateTokens(section.text),
       reason: section.reason,
     })),
+    dropped,
+    ...(budget ? { budget } : {}),
   };
 }
 
-/** The run-summary suffix — ` context=1234tok(est)` — or `""` for an empty prompt. */
+/**
+ * The run-summary suffix: the total, per-kind spend, and what a budget did.
+ *
+ * `context=153tok(est) context_kinds=base:17,skills:60` is the shape; a budget adds
+ * `context_budget=200`, and anything it removed adds `context_dropped=1`. All of it
+ * is an estimate — usage only exists after the provider reports it.
+ */
 export function contextSummary(context: AssembledContext): string {
-  return context.tokens > 0 ? ` context=${context.tokens}tok(est)` : "";
+  if (context.sections.length === 0 && context.dropped.length === 0) return "";
+  const kinds = new Map<ContextKind, number>();
+  for (const section of context.sections) {
+    kinds.set(section.kind, (kinds.get(section.kind) ?? 0) + section.tokens);
+  }
+  const parts = [` context=${context.tokens}tok(est)`];
+  if (kinds.size > 0) {
+    parts.push(
+      ` context_kinds=${[...kinds.entries()].map(([kind, tokens]) => `${kind}:${tokens}`).join(",")}`,
+    );
+  }
+  if (context.budget?.total !== undefined) parts.push(` context_budget=${context.budget.total}`);
+  if (context.dropped.length > 0) parts.push(` context_dropped=${context.dropped.length}`);
+  return parts.join("");
 }
+

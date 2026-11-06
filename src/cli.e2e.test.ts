@@ -832,6 +832,41 @@ describe("cli, end to end and offline", () => {
     expect(JSON.stringify(model.requests[1]?.messages)).not.toContain("root:");
   }, 30_000);
 
+  it("enforces a context budget, and says what it dropped", async () => {
+    model = new StubModelServer({ respond: () => ({ text: "done" }) });
+    const baseUrl = await model.start();
+
+    const run = await runCli([
+      "--prompt",
+      "hi",
+      "--tasks",
+      // The base section alone is ~19 tokens; the task list and the resource index
+      // cannot both fit, so the lowest priority goes first.
+      "--context-budget",
+      "20",
+      "--server",
+      serverSpec(),
+      "--base-url",
+      baseUrl,
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--no-stream",
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-budget",
+      "--max-steps",
+      "1",
+    ]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("context_budget=20");
+    expect(run.stdout).toMatch(/context_dropped=[1-9]/);
+    // The base section is the highest priority and survives.
+    expect(run.stdout).toContain("context_kinds=base:");
+  }, 30_000);
+
   it("lists skills, with their level and hash, and needs no MCP server", async () => {
     const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-"));
     const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-src-"));
