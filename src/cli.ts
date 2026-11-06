@@ -592,7 +592,9 @@ async function main(): Promise<void> {
     });
     const systemWithServers = context.text;
     if (args.listContext) {
-      console.log(formatContextCatalog(catalogFor()));
+      console.log(
+        formatContextCatalog(catalogFor(), { summary: contextSummary(context).trim() }),
+      );
       return;
     }
 
@@ -754,7 +756,10 @@ async function main(): Promise<void> {
         ...runConfig,
         approvals: !args.autoApprove,
         context: args.context ? () => runtime.learnedContext() : undefined,
-        contextReport: () => formatContextCatalog(contextCatalog),
+        // The REPL's /context and the run summary describe the same prompt, so they
+        // print the same numbers rather than two near-identical ones.
+        contextReport: () =>
+          formatContextCatalog(contextCatalog, { summary: contextSummary(context).trim() }),
         decision: () => runtime.lastDecisionSummary(),
         cost: () => runtime.costSummary(),
         policy: () => runtime.serverPolicySummary(),
