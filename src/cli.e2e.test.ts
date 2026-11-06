@@ -867,6 +867,32 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout).toContain("context_kinds=base:");
   }, 30_000);
 
+  it("lists what a budget dropped, so the cap is not silent", async () => {
+    // Listing needs no model call, but the CLI resolves a catalog first.
+    const run = await runCli([
+      "--list-context",
+      "--tasks",
+      "--context-budget",
+      "20",
+      "--base-url",
+      "http://127.0.0.1:1/v1",
+      "--api-key",
+      "test-key",
+      "--no-ollama",
+      "--db",
+      ":memory:",
+      "--session",
+      "cli-e2e-dropped",
+    ]);
+
+    expect(run.code).toBe(0);
+    // The task section cannot fit alongside the base prompt at 20 tokens.
+    expect(run.stdout).toMatch(/dropped\tsection\ttasks\tdropped: total budget/);
+    expect(run.stdout).toMatch(/\d+ dropped by budget/);
+    // The base section survives, and is the only thing counted.
+    expect(run.stdout).toContain("loaded\tsection\tbase");
+  }, 30_000);
+
   it("lists skills, with their level and hash, and needs no MCP server", async () => {
     const configHome = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-"));
     const skillsDir = mkdtempSync(join(tmpdir(), "agent-e2e-skill-list-src-"));
