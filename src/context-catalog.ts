@@ -17,7 +17,7 @@ import type { Skill } from "./skills.js";
 import type { ToolSpec } from "./types.js";
 
 export type ContextItemKind = "section" | "skill" | "resource" | "tool";
-export type ContextItemState = "loaded" | "discovered";
+export type ContextItemState = "loaded" | "discovered" | "dropped";
 
 export interface ContextItem {
   id: string;
@@ -33,6 +33,12 @@ export interface ContextItem {
 export interface ContextCatalogInput {
   /** The sections that were actually assembled into the prompt. */
   sections: AssembledSection[];
+  /**
+   * Sections a budget removed. They cost nothing now, so their `tokens` is `0`, but
+   * omitting them entirely would make a budget look like the sections never existed —
+   * an operator needs to see what the cap took away.
+   */
+  dropped?: Array<{ id: string; kind: string; tokens: number; reason: string }>;
   skills: Skill[];
   resources: Array<{ uri: string; name?: string; serverName?: string }>;
   tools: ToolSpec[];
@@ -51,6 +57,17 @@ export function buildContextCatalog(input: ContextCatalogInput): ContextItem[] {
     source: section.source,
     state: "loaded",
     tokens: section.tokens,
+  }));
+
+  // Dropped sections come after the loaded ones: what the prompt carries first, then
+  // what the budget took away and why.
+  const dropped: ContextItem[] = (input.dropped ?? []).map((section) => ({
+    id: `section:${section.id}`,
+    kind: "section",
+    name: section.id,
+    source: section.reason === "total-budget" ? "dropped: total budget" : "dropped: kind budget",
+    state: "dropped",
+    tokens: 0,
   }));
 
   const skills: ContextItem[] = input.skills.map((skill) => ({
@@ -86,7 +103,13 @@ export function buildContextCatalog(input: ContextCatalogInput): ContextItem[] {
   }));
 
   const byName = (a: ContextItem, b: ContextItem): number => a.name.localeCompare(b.name);
-  return [...sections, ...skills.sort(byName), ...resources.sort(byName), ...tools.sort(byName)];
+  return [
+    ...sections,
+    ...dropped,
+    ...skills.sort(byName),
+    ...resources.sort(byName),
+    ...tools.sort(byName),
+  ];
 }
 
 /** Total estimated prompt cost of the items that are actually loaded. */
@@ -98,7 +121,8 @@ export function loadedContextTokens(items: ContextItem[]): number {
 
 /**
  * One line per item, tab-separated like `/tools`: `state  kind  name  source  cost`.
- * The footer totals what is actually loaded, which is the number a budget can act on.
+ * The footer totals what is actually loaded, which is the number a budget can act on,
+ * and names anything the budget removed so a cap is never silent.
  */
 export function formatContextCatalog(items: ContextItem[]): string {
   if (items.length === 0) return "[context] nothing discovered";
@@ -106,8 +130,10 @@ export function formatContextCatalog(items: ContextItem[]): string {
     [item.state, item.kind, item.name, item.source, `${item.tokens}tok(est)`].join("\t"),
   );
   const loaded = items.filter((item) => item.state === "loaded");
+  const dropped = items.filter((item) => item.state === "dropped").length;
   lines.push(
-    `[context] ${items.length} item(s); ${loaded.length} loaded, ~${loadedContextTokens(items)}tok(est) in the prompt`,
+    `[context] ${items.length} item(s); ${loaded.length} loaded, ~${loadedContextTokens(items)}tok(est) in the prompt` +
+      (dropped > 0 ? `; ${dropped} dropped by budget` : ""),
   );
   return lines.join("\n");
 }

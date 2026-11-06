@@ -386,7 +386,13 @@ async function main(): Promise<void> {
     const specs = await tools.listTools();
     parentSpecs = specs; // delegation narrows from this, at call time
     const catalogFor = () =>
-      buildContextCatalog({ sections: context.sections, skills, resources, tools: specs });
+      buildContextCatalog({
+        sections: context.sections,
+        dropped: context.dropped,
+        skills,
+        resources,
+        tools: specs,
+      });
     if (args.listTools) {
       for (const spec of specs) {
         console.log(`${spec.name}\t${spec.serverName ?? ""}\t${spec.description ?? ""}`);

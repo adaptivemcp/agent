@@ -85,6 +85,29 @@ describe("context catalog", () => {
     expect(text).toContain("[context] 6 item(s); 2 loaded, ~42tok(est) in the prompt");
   });
 
+  it("shows what a budget removed, and why, after the loaded sections", () => {
+    const items = catalogInput({
+      dropped: [
+        { id: "tasks", kind: "tasks", tokens: 40, reason: "total-budget" },
+        { id: "skills", kind: "skills", tokens: 30, reason: "kind-budget" },
+      ],
+    });
+
+    const dropped = items.filter((item) => item.state === "dropped");
+
+    expect(dropped.map((item) => item.name)).toEqual(["tasks", "skills"]);
+    // A dropped section costs nothing now — reporting its old cost would double-count.
+    expect(dropped.every((item) => item.tokens === 0)).toBe(true);
+    expect(dropped[0]?.source).toBe("dropped: total budget");
+    expect(dropped[1]?.source).toBe("dropped: kind budget");
+    // And the footer says how many, so a cap is never silent.
+    expect(formatContextCatalog(items)).toContain("2 dropped by budget");
+  });
+
+  it("says nothing about drops when the budget removed nothing", () => {
+    expect(formatContextCatalog(catalogInput())).not.toContain("dropped by budget");
+  });
+
   it("says so when there is nothing to list", () => {
     const empty: ContextItem[] = [];
     expect(formatContextCatalog(empty)).toBe("[context] nothing discovered");
