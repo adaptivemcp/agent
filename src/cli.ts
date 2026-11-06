@@ -60,6 +60,7 @@ import { modePrompt, modeTools, tasksStopGuard } from "./modes.js";
 import { PlanningPass, PlanUsage, formatSteps } from "./steps.js";
 import { assembleContext, contextSummary, type ContextSection } from "./context.js";
 import { buildContextCatalog, formatContextCatalog } from "./context-catalog.js";
+import { listAllResources, resourcesPrompt, resourcesToolset } from "./resources.js";
 import { renderOneShot, stringify } from "./render.js";
 import type { ChatMessage, ChatModel, ToolExecutionResult, ToolSpec } from "./types.js";
 
@@ -271,6 +272,10 @@ async function main(): Promise<void> {
       ? new HttpToolset(spec.serverName, spec)
       : new StdioToolset(spec.serverName, spec),
   );
+  // Resources are listed once, up front: the prompt needs an index (names + URIs),
+  // the read tool needs the boundary it may read inside, and the catalog reports it.
+  // A server that fails to list is skipped rather than failing the run.
+  const resources = await listAllResources(toolsets);
   // Skills are host-owned instructions exposed as an ordinary toolset, so
   // reading one takes the same path as any MCP tool (gate, telemetry, graph).
   // Only names and descriptions reach the prompt; the body is fetched on demand.
@@ -315,6 +320,7 @@ async function main(): Promise<void> {
   const implied = args.mode ? modeTools(args.mode) : { task: false, tasks: false };
   const toolsetList: Toolset[] = [...toolsets];
   if (skills.length > 0) toolsetList.push(skillsToolset(skills));
+  if (resources.length > 0) toolsetList.push(resourcesToolset(toolsets));
   if (args.tasks || implied.tasks) {
     toolsetList.push(
       tasksToolset({
@@ -379,24 +385,7 @@ async function main(): Promise<void> {
   try {
     const specs = await tools.listTools();
     parentSpecs = specs; // delegation narrows from this, at call time
-    // Resources are only listed when something asks for the catalog: the RPC costs
-    // a round trip per server, and a one-shot run has no use for it.
-    const gatherContextResources = async (): Promise<
-      Array<{ uri: string; name?: string; serverName?: string }>
-    > => {
-      const resources: Array<{ uri: string; name?: string; serverName?: string }> = [];
-      for (const toolset of toolsets) {
-        try {
-          for (const resource of await toolset.listResources()) {
-            resources.push({ ...resource, serverName: toolset.serverName });
-          }
-        } catch {
-          // A server that lists no resources is fine; a broken one must not stop the run.
-        }
-      }
-      return resources;
-    };
-    const catalogFor = (resources: Array<{ uri: string; name?: string; serverName?: string }>) =>
+    const catalogFor = () =>
       buildContextCatalog({ sections: context.sections, skills, resources, tools: specs });
     if (args.listTools) {
       for (const spec of specs) {
@@ -568,6 +557,17 @@ async function main(): Promise<void> {
         reason: "names and descriptions only; bodies load on demand",
       });
     }
+    const resourcesSection = resourcesPrompt(resources);
+    if (resourcesSection) {
+      contextSections.push({
+        id: "resources",
+        kind: "resources",
+        source: `${resources.length} resource(s)`,
+        text: resourcesSection,
+        priority: 65,
+        reason: "an index only; contents are read on demand",
+      });
+    }
     if (args.tasks || implied.tasks) {
       contextSections.push({
         id: "tasks",
@@ -581,7 +581,7 @@ async function main(): Promise<void> {
     const context = assembleContext(contextSections);
     const systemWithServers = context.text;
     if (args.listContext) {
-      console.log(formatContextCatalog(catalogFor(await gatherContextResources())));
+      console.log(formatContextCatalog(catalogFor()));
       return;
     }
 
@@ -738,7 +738,7 @@ async function main(): Promise<void> {
       const serverByTool = new Map(specs.map((spec) => [spec.name, spec.serverName]));
       // The REPL is interactive, so the catalog is built once when it starts; a
       // resource listing is a round trip per server and nothing changes it mid-session.
-      const contextCatalog = catalogFor(await gatherContextResources());
+      const contextCatalog = catalogFor();
       await runRepl({
         ...runConfig,
         approvals: !args.autoApprove,

@@ -13,7 +13,13 @@
  */
 
 /** Where a section comes from, for `/context` and for a run record to read back. */
-export type ContextKind = "base" | "mode" | "server-instructions" | "skills" | "tasks";
+export type ContextKind =
+  | "base"
+  | "mode"
+  | "server-instructions"
+  | "skills"
+  | "resources"
+  | "tasks";
 
 export interface ContextSection {
   /** Stable id, so a test or a report can name one section. */
