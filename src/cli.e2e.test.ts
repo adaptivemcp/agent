@@ -177,6 +177,9 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout).toContain("fixture_fixture_echo"); // the call was rendered
     expect(run.stdout).toContain("echoed hi"); // and so was the answer
     expect(run.stdout).toContain("stop=completed");
+    // The prompt is assembled from sections, and the run says how big it is. The
+    // number is an estimate, so it is labelled as one (real usage comes later).
+    expect(run.stdout).toMatch(/context=\d+tok\(est\)/);
     // Two model calls: choose the tool, then answer with its result.
     expect(model.requests).toHaveLength(2);
     expect(model.requests[0]?.messages.some((message) => message.role === "tool")).toBe(false);

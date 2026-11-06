@@ -244,6 +244,15 @@ instead of forwarding them silently drops the next seam; that is exactly how
 `steer`/`stopGuard` went missing here, working in a one-shot run and doing nothing
 interactively.
 
+**Context assembly** (`src/context.ts`) is one place where the system prompt is
+chosen, ordered and counted. Each section carries its `id`, `kind`, `source`,
+`priority` and `reason`; sections are ordered by priority (ties keep declaration
+order) and empty ones are dropped. The run summary reports `context=<n>tok(est)` — an
+_estimate_, labelled as one, because real usage only exists after the provider reports
+`ChatUsage`. This exists so budgets, provenance and measurement have somewhere to
+attach; selection, retrieval and retention are deliberately separate and not built yet
+(ADR-005 in `adaptive-mcp`).
+
 `AgentRuntime` is the bridge into Adaptive MCP. It wires `AdaptiveRuntime`
 (telemetry → store → evaluation → derived view), `ThinClient` (approval gate +
 retry + middleware), and `GraphTrackingMiddleware`, and exposes:
