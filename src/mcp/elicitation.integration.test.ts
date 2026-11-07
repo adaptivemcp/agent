@@ -193,6 +193,36 @@ describe("elicitation", () => {
     expect(received?.content).toEqual({ tags: ["a", "b"] });
   }, 30_000);
 
+  it("re-edits a single field from the review and sends the corrected value", async () => {
+    let received: { action?: string; content?: Record<string, unknown> } | undefined;
+    const server = await start((result) => {
+      received = result as typeof received;
+    });
+    running = server.server;
+    // name, age, newsletter, noDefault, then: edit name, corrected name, submit.
+    const answers = ["Ada", "41", "no", "a note", "edit name", "Grace", "y"];
+    const toolset = new HttpToolset("remote", {
+      serverName: "remote",
+      url: server.url,
+      elicitation: "prompt",
+      elicitationAsk: () => async () => answers.shift() ?? "",
+    });
+
+    try {
+      const result = await toolset.callTool("ask", {});
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+    } finally {
+      await toolset.close();
+    }
+
+    expect(received?.content).toEqual({
+      name: "Grace",
+      age: 41,
+      newsletter: false,
+      noDefault: "a note",
+    });
+  }, 30_000);
+
   it("surfaces a url-mode request and accepts only after the person confirms", async () => {
     let received: { action?: string } | undefined;
     const server = await start((result) => {

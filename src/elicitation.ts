@@ -304,17 +304,41 @@ export async function readForm(
   if (Object.keys(fields).length > 1) {
     let passes = 0;
     let nonAnswers = 0;
+    let edits = 0;
     while (passes < 2) {
       notify(renderReview(request, content));
-      const answer = (await ask("  submit? [Y/n]: ")).trim().toLowerCase();
-      if (answer === "" || answer === "y" || answer === "yes") return { action: "accept", content };
-      if (answer === "n" || answer === "no") {
+      const answer = (await ask("  submit? [Y/n/edit <field>]: ")).trim();
+      const lowered = answer.toLowerCase();
+      if (lowered === "" || lowered === "y" || lowered === "yes") {
+        return { action: "accept", content };
+      }
+      if (lowered === "n" || lowered === "no") {
         if (passes === 1) return { action: "decline" };
         notify("[elicitation] re-entering the form");
         const retry = await collect(fields, ask, notify);
         if (!retry) return { action: "decline" };
         content = retry;
         passes += 1;
+        continue;
+      }
+      const edit = /^edit\s+(.+)$/i.exec(answer);
+      if (edit) {
+        const name = edit[1]?.trim() ?? "";
+        const field = fields[name];
+        if (!field) {
+          notify(`[elicitation] no field named "${name}"`);
+          nonAnswers += 1;
+          if (nonAnswers >= 3) return { action: "decline" };
+          continue;
+        }
+        // Re-ask one field and keep the rest: a typo should not cost the whole form.
+        if (edits >= 5) return { action: "decline" };
+        edits += 1;
+        notify(`[elicitation] editing ${name}`);
+        const single = await collect({ [name]: field }, ask, notify);
+        if (!single) return { action: "decline" };
+        if (name in single) content[name] = single[name];
+        else delete content[name];
         continue;
       }
       // Anything else is not a decision; ask again rather than guessing, but not forever.

@@ -22,23 +22,21 @@ otherwise it is a protocol feature with no product behind it.
 **Done when:** a host can delegate a scoped token to a second server on purpose, the
 scenario passes, and the baseline file is empty (and therefore deleted).
 
-### 2. Elicitation: the last edges
+### 2. Elicitation: the last edge
 
-`--elicitation prompt` renders the whole form, reviews it, and now handles **`mode: "url"`**:
-the link is shown, the person confirms whether they completed the flow there, and only a yes
-accepts. A non-http(s) URL (`file:`, `javascript:`) is refused without ever being displayed,
-and headless modes still decline rather than claim a person did something. The capability is
-advertised as `elicitation.url` only in prompt mode, because a headless host would answer
-every such request with a decline.
+The review step can now **re-open a single field** (`edit <name>`) instead of forcing a full
+re-entry, keeps the other answers, drops a field cleared during the edit, and bounds both
+unknown field names and the number of edits. Along with `mode: "url"` (link shown in prompt
+mode, non-http(s) refused unseen) and schema-typed answers, the elicitation surface is
+complete for a terminal host.
 
-What remains is genuinely small:
+One edge is deliberate, not missing: an accepted url flow is the person's assertion. The
+client does not poll for `notifications/elicitation/complete` to reconcile it, because
+nothing in the host consumes that signal yet — adding a reconciliation loop without a
+consumer would be state with no reader.
 
-- the review cannot re-open a single field — only a full re-entry;
-- an accepted url request is a person's assertion; the client does not poll the server for
-  `notifications/elicitation/complete` and reconcile it.
-
-**Done when:** the review can edit one field, and an accepted url flow is confirmed by the
-server's completion notification (or the decline is explicit).
+**Done when:** a host feature (e.g. resuming a paused tool after an out-of-band approval)
+needs the completion notification; until then the assertion stands and is documented.
 
 ### 3. Roadmap and security posture stay current
 
