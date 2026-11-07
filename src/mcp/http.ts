@@ -12,6 +12,15 @@ export interface HttpToolsetOptions {
   url: string;
   /** Static headers sent with every request (e.g. a bearer token). */
   headers?: Record<string, string>;
+  /**
+   * A credential that can change mid-session. `header` is read per request; a `401`
+   * triggers one `refresh()` and one retry, so a token that expired during a long run is
+   * replaced without reconnecting the transport.
+   */
+  auth?: {
+    header: () => string;
+    refresh?: () => Promise<string>;
+  };
 }
 
 /**
@@ -40,7 +49,7 @@ export class HttpToolset implements ResourceToolset {
     if (this.client) return this.client;
     const transport = new StreamableHTTPClientTransport(new URL(this.options.url), {
       requestInit: this.options.headers ? { headers: this.options.headers } : undefined,
-      fetch: async (input, init) => fetch(input, withAuthorization(init, this.credentials)),
+      fetch: async (input, init) => this.authorizedFetch(input, init),
     });
     const client = new Client(
       { name: "adaptivemcp-agent", version: "0.0.1" },
@@ -49,6 +58,34 @@ export class HttpToolset implements ResourceToolset {
     await client.connect(transport);
     this.client = client;
     return client;
+  }
+
+  /**
+   * Send one request, then retry once with a refreshed token if the server answers 401.
+   *
+   * Retrying inside `fetch` keeps the MCP SDK's connection state intact — a re-`connect`
+   * would lose the session id, and a 401 on `initialize` has no session to recover.
+   * `input` is cloned per attempt because a `Request` body can only be consumed once.
+   */
+  private async authorizedFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    const send = (refreshed?: string): Promise<Response> => {
+      const target = input instanceof Request ? input.clone() : input;
+      // Read the live credential per request: after a refresh, `header()` already returns
+      // the new value, so only the retry needs the explicit override.
+      const authorization = refreshed ?? this.options.auth?.header();
+      return fetch(target, withAuthorization(init, this.credentials, authorization));
+    };
+    const response = await send();
+    if (response.status !== 401 || !this.options.auth?.refresh) return response;
+    // Drain the body so the connection can be reused for the retry.
+    await response.body?.cancel().catch(() => {});
+    let authorization: string;
+    try {
+      authorization = await this.options.auth.refresh();
+    } catch {
+      return response;
+    }
+    return send(authorization);
   }
 
   async instructions(): Promise<string | undefined> {
@@ -114,10 +151,18 @@ export class HttpToolset implements ResourceToolset {
   }
 }
 
-/** Overlay the resolved credentials on a request init as `Authorization`. */
-function withAuthorization(init: RequestInit | undefined, credentials?: Record<string, unknown>): RequestInit {
-  const authorization = credentials?.authorization;
-  if (typeof authorization !== "string") return init ?? {};
+/**
+ * Overlay the resolved credentials, or an explicit refreshed header, on a request init.
+ * Precedence: refreshed header > per-call credentials > static headers.
+ */
+function withAuthorization(
+  init: RequestInit | undefined,
+  credentials?: Record<string, unknown>,
+  refreshed?: string,
+): RequestInit {
+  const authorization =
+    refreshed ?? (typeof credentials?.authorization === "string" ? credentials.authorization : undefined);
+  if (!authorization) return init ?? {};
   const headers = new Headers(init?.headers);
   headers.set("Authorization", authorization);
   return { ...init, headers };

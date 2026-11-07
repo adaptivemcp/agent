@@ -26,6 +26,14 @@ export interface HttpServerOptions {
     clientName?: string;
     scopes?: string[];
   };
+  /**
+   * Resolved at runtime by the CLI from `oauth`; never parsed from a spec. Separated so a
+   * spec cannot smuggle a header-producing function into config.
+   */
+  auth?: {
+    header: () => string;
+    refresh?: () => Promise<string>;
+  };
 }
 
 /** A parsed `--server` spec: local stdio, or remote HTTP. */

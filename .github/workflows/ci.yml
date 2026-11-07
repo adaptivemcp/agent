@@ -151,6 +151,17 @@ jobs:
             --timeout 60000 \
             --output-dir conformance-results/auth-metadata-default
 
+      - name: Conformance (auth metadata variants)
+        working-directory: agent
+        run: |
+          for scenario in auth/metadata-var1 auth/metadata-var2 auth/metadata-var3; do
+            npx -y @modelcontextprotocol/conformance@0.1.16 client \
+              --command "node scripts/conformance-client.mjs --auth" \
+              --scenario "$scenario" \
+              --timeout 60000 \
+              --output-dir "conformance-results/${scenario//\//-}"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

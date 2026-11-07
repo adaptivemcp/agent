@@ -2,7 +2,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireToken, authorizationServerMetadataUrl, protectedResourceUrl } from "./oauth.js";
+import {
+  acquireToken,
+  authorizationServerMetadataUrl,
+  authorizationServerMetadataUrls,
+  protectedResourceUrl,
+} from "./oauth.js";
 
 /**
  * The OAuth path against a real (local) authorization server.
@@ -89,9 +94,11 @@ function startAuthServer(state: { fail?: string } = {}): {
       request.on("end", () => {
         seen.tokenBody = new URLSearchParams(raw);
         seen.verifier = seen.tokenBody.get("code_verifier") ?? undefined;
+        const grant = seen.tokenBody.get("grant_type");
         send(200, {
-          access_token: "test-access-token",
+          access_token: grant === "refresh_token" ? "refreshed-access-token" : "test-access-token",
           token_type: "Bearer",
+          refresh_token: "test-refresh-token",
           expires_in: 3600,
           scope: "read",
         });
@@ -126,16 +133,15 @@ describe("OAuth discovery and authorization", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const resourceUrl = `http://127.0.0.1:${(auth.server.address() as AddressInfo).port}/mcp`;
 
-    const token = await acquireToken(
+    const session = await acquireToken(
       resourceUrl,
       { authorize: "fetch", clientName: "agent-test" },
       { timeoutMs: 5000 },
     );
 
-    expect(token.accessToken).toBe("test-access-token");
-    expect(token.tokenType).toBe("Bearer");
-    expect(token.clientId).toBe("test-client-id");
-    expect(token.scope).toBe("read");
+    expect(session.header()).toBe("Bearer test-access-token");
+    expect(session.clientId).toBe("test-client-id");
+    expect(session.scope).toBe("read");
 
     // Path-based PRM, never the root: the root is the trap in `auth/metadata-default`.
     expect(auth.seen.rootPrmRequests).toBe(0);
@@ -176,6 +182,61 @@ describe("OAuth discovery and authorization", () => {
     ).rejects.toThrow(/authorization failed: access_denied/);
   }, 20_000);
 
+  it("refreshes with the refresh_token grant and swaps the header", async () => {
+    const auth = startAuthServer();
+    running = auth.server;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const resourceUrl = `http://127.0.0.1:${(auth.server.address() as AddressInfo).port}/mcp`;
+
+    const session = await acquireToken(resourceUrl, { authorize: "fetch" }, { timeoutMs: 5000 });
+    expect(session.header()).toBe("Bearer test-access-token");
+
+    const refreshed = await session.refresh();
+
+    expect(refreshed).toBe("Bearer refreshed-access-token");
+    expect(session.header()).toBe("Bearer refreshed-access-token");
+    expect(auth.seen.tokenBody?.get("grant_type")).toBe("refresh_token");
+    expect(auth.seen.tokenBody?.get("refresh_token")).toBe("test-refresh-token");
+    expect(auth.seen.tokenBody?.get("resource")).toBe(resourceUrl);
+  }, 20_000);
+
+  it("completes the browser flow when the callback server receives the redirect", async () => {
+    // The interactive path has a human in it, so this drives the loopback listener the
+    // way a browser would: read the URL from the log, fetch it, let the 302 land on the
+    // local callback, and assert the flow finishes with the code.
+    const auth = startAuthServer();
+    running = auth.server;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const resourceUrl = `http://127.0.0.1:${(auth.server.address() as AddressInfo).port}/mcp`;
+
+    let authorizeUrl: string | undefined;
+    const pending = acquireToken(
+      resourceUrl,
+      { authorize: "browser", clientName: "loopback-test" },
+      {
+        timeoutMs: 10_000,
+        log: (message) => {
+          // The first log line names the issuer; the URL to open is the one ending in
+          // `/authorize?...`. Only the latter is a browser target.
+          if (!message.includes("open this URL")) return;
+          const match = /(https?:\/\/\S+)/.exec(message);
+          if (match?.[1] && !authorizeUrl) authorizeUrl = match[1];
+        },
+      },
+    );
+
+    // Wait for the URL to be printed, then act as the browser would.
+    for (let attempt = 0; attempt < 100 && !authorizeUrl; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(authorizeUrl, "the authorization URL must be printed").toBeDefined();
+    const response = await fetch(authorizeUrl!);
+    expect(response.status).toBe(200);
+
+    const session = await pending;
+    expect(session.header()).toBe("Bearer test-access-token");
+  }, 30_000);
+
   it("builds RFC 9728 and RFC 8414 locations", () => {
     expect(protectedResourceUrl("https://host.example/mcp")).toBe(
       "https://host.example/.well-known/oauth-protected-resource/mcp",
@@ -190,5 +251,12 @@ describe("OAuth discovery and authorization", () => {
     expect(authorizationServerMetadataUrl("https://host.example/tenant1")).toBe(
       "https://host.example/.well-known/oauth-authorization-server/tenant1",
     );
+    // Both spellings, and OIDC before the appended form: some deployments publish only one.
+    expect(authorizationServerMetadataUrls("https://host.example/tenant1")).toEqual([
+      "https://host.example/.well-known/oauth-authorization-server/tenant1",
+      "https://host.example/.well-known/openid-configuration/tenant1",
+      "https://host.example/tenant1/.well-known/openid-configuration",
+      "https://host.example/tenant1/.well-known/oauth-authorization-server",
+    ]);
   });
 });

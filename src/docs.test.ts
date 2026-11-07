@@ -143,6 +143,10 @@ describe("documentation guards", () => {
 
     expect(ci).toContain("--scenario auth/metadata-default");
     expect(ci).toContain("conformance-client.mjs --auth");
+    // The docs table says all four metadata shapes pass, so CI must run all four.
+    for (const variant of ["var1", "var2", "var3"]) {
+      expect(ci, `CI must run auth/metadata-${variant}`).toContain(`auth/metadata-${variant}`);
+    }
     // A baseline that is no longer needed is dead config; the file is gone.
     expect(existsSync(join(REPO, "conformance-client-baseline.yml"))).toBe(false);
   });
