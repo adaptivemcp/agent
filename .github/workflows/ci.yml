@@ -260,6 +260,30 @@ jobs:
               --output-dir "conformance-results/${scenario//\//-}"
           done
 
+      # Both of these need a tool call: elicitation is requested during one, and the SSE
+      # scenario closes the tool stream mid-response.
+      - name: Conformance (elicitation defaults)
+        working-directory: agent
+        env:
+          CONFORMANCE_TOOL: conformance_test_client_elicitation_defaults
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --call --elicitation" \
+            --scenario elicitation-sep1034-client-defaults \
+            --timeout 60000 \
+            --output-dir conformance-results/elicitation-sep1034-client-defaults
+
+      - name: Conformance (SSE retry)
+        working-directory: agent
+        env:
+          CONFORMANCE_TOOL: conformance_test_reconnection
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --call" \
+            --scenario sse-retry \
+            --timeout 60000 \
+            --output-dir conformance-results/sse-retry
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

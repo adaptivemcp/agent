@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS_METADATA_EXTENSION } from "@adaptivemcp/spec";
 import type { ToolSpec } from "../types.js";
@@ -17,6 +18,13 @@ export interface HttpToolsetOptions {
    * triggers one `refresh()` and one retry, so a token that expired during a long run is
    * replaced without reconnecting the transport.
    */
+  /**
+   * How to answer a server's `elicitation/create` request. Opt-in: with no value the client
+   * does not advertise the capability at all, so a server cannot ask a host that has no way
+   * to answer. `defaults` accepts with the schema's own defaults (SEP-1034); `decline`
+   * refuses explicitly.
+   */
+  elicitation?: "defaults" | "decline";
   auth?: {
     header: () => string;
     refresh?: () => Promise<string>;
@@ -55,8 +63,25 @@ export class HttpToolset implements ResourceToolset {
     });
     const client = new Client(
       { name: "adaptivemcp-agent", version: "0.0.1" },
-      { capabilities: { extensions: { [TOOLS_METADATA_EXTENSION]: {} } } },
+      {
+        capabilities: {
+          extensions: { [TOOLS_METADATA_EXTENSION]: {} },
+          ...(this.options.elicitation
+            ? { elicitation: { form: { applyDefaults: this.options.elicitation === "defaults" } } }
+            : {}),
+        },
+      },
     );
+    if (this.options.elicitation) {
+      const mode = this.options.elicitation;
+      client.setRequestHandler(ElicitRequestSchema, async (request) => {
+        if (mode === "decline") return { action: "decline" };
+        // `mode: "url"` elicitation has no form to fill; declining is the only honest answer.
+        const params = request.params as { mode?: string; requestedSchema?: unknown };
+        if (params.mode === "url") return { action: "decline" };
+        return { action: "accept", content: schemaDefaults(params.requestedSchema) };
+      });
+    }
     await client.connect(transport);
     this.client = client;
     return client;
@@ -169,6 +194,23 @@ export class HttpToolset implements ResourceToolset {
     this.client = undefined;
     this.credentials = undefined;
   }
+}
+
+/**
+ * Pre-fill an elicitation response from the schema's `default` values (SEP-1034).
+ *
+ * Only declared defaults are included — the client never invents a value, and a field with
+ * no default stays omitted so the user (or the server) is still the authority on it.
+ */
+export function schemaDefaults(schema: unknown): Record<string, unknown> {
+  const content: Record<string, unknown> = {};
+  const properties = (schema as { properties?: Record<string, { default?: unknown }> } | undefined)
+    ?.properties;
+  if (!properties) return content;
+  for (const [name, field] of Object.entries(properties)) {
+    if (field && typeof field === "object" && "default" in field) content[name] = field.default;
+  }
+  return content;
 }
 
 /** `Bearer error="insufficient_scope", scope="a b"` → `["a", "b"]`. */
