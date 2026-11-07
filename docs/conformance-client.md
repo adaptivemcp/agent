@@ -226,8 +226,12 @@ listing:
 - **Elicitation** only happens during a tool call, and the host did not implement it at all.
   It now does, opt-in: `--elicitation defaults` accepts with the schema's declared defaults
   (SEP-1034), `--elicitation decline` refuses, and `--elicitation prompt` asks the person —
-  one line per field, typed against the schema (integer, number, boolean, enum) with the
-  declared default offered and a rejected answer asked once more before declining. With no
+  one line per field, typed against the schema (integer, number, boolean, enum, and arrays as
+  a JSON list) with the declared default offered and a rejected answer asked once more
+  before declining. Arrays are the interesting case: the form schema allows arrays of
+  primitives, and they used to reach the server as the raw typed string; they are now
+  parsed and checked. Nested objects are not part of the form schema (the SDK enforces
+  flat properties), but a peer that sends one anyway is accepted only if the JSON parses. With no
   flag the capability is **not advertised**: a server should not ask a client that cannot
   answer. Only declared defaults are filled; a field without one stays omitted. A
   `mode: "url"` elicitation is declined, because there is no form to complete. In the REPL

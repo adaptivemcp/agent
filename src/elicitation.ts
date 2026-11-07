@@ -35,6 +35,11 @@ interface FieldSchema {
   enum?: unknown[];
   enumNames?: string[];
   oneOf?: { const?: unknown; title?: string }[];
+  /** For `object` fields. */
+  properties?: Record<string, FieldSchema>;
+  required?: string[];
+  /** For `array` fields. */
+  items?: FieldSchema;
 }
 
 /** Pre-fill from declared defaults only. */
@@ -78,10 +83,14 @@ export function renderForm(request: ElicitationRequest): string {
     const field = fields[name] as FieldSchema;
     const type = field.type ?? "string";
     const options = choices(field);
-    const parts = [`  ${name} (${type})`];
+    const parts = [`  ${name} (${type === "object" || type === "array" ? `${type}, JSON` : type})`];
     if (field.title) parts.push(`${field.title}.`);
     if (field.description) parts.push(field.description);
     if (options.length > 0) parts.push(`one of: ${options.map((o) => o.label).join(", ")}`);
+    if (type === "object" && field.required?.length) {
+      parts.push(`required keys: ${field.required.join(", ")}`);
+    }
+    if (type === "array" && field.items?.type) parts.push(`items: ${field.items.type}`);
     if ("default" in field) parts.push(`default: ${String(field.default)}`);
     lines.push(parts.join(" "));
   }
@@ -124,8 +133,67 @@ export function coerceAnswer(field: FieldSchema, answer: string): unknown {
       if (!Number.isFinite(value)) throw new Error("expected a number");
       return value;
     }
+    case "object":
+    case "array": {
+      // A nested value is edited as JSON: one line per field does not scale to a tree, and
+      // a rejected document gets the same second chance a typed answer does.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error(`expected JSON ${field.type === "array" ? "array" : "object"}`);
+      }
+      validateValue(field, parsed);
+      return parsed;
+    }
     default:
       return answer;
+  }
+}
+
+/**
+ * Check a parsed JSON value against the field's shape.
+ *
+ * Deliberately shallow-and-honest: it enforces what the form asked for (array is an array,
+ * object has its required keys, nested declared fields match their primitive type) and does
+ * not pretend to be a JSON Schema validator. The server remains the authority.
+ */
+export function validateValue(field: FieldSchema, value: unknown): void {
+  if (field.type === "array") {
+    if (!Array.isArray(value)) throw new Error("expected a JSON array");
+    if (field.items) for (const item of value) validateValue(field.items, item);
+    return;
+  }
+  if (field.type === "object") {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error("expected a JSON object");
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of field.required ?? []) {
+      if (!(key in record)) throw new Error(`missing required key "${key}"`);
+    }
+    for (const [key, nested] of Object.entries(field.properties ?? {})) {
+      if (key in record) validateValue(nested, record[key]);
+    }
+    return;
+  }
+  if (value === null) return;
+  switch (field.type) {
+    case "integer":
+      if (!Number.isInteger(value)) throw new Error("expected an integer");
+      return;
+    case "number":
+      if (typeof value !== "number" || !Number.isFinite(value))
+        throw new Error("expected a number");
+      return;
+    case "boolean":
+      if (typeof value !== "boolean") throw new Error("expected a boolean");
+      return;
+    case "string":
+      if (typeof value !== "string") throw new Error("expected a string");
+      return;
+    default:
+      return;
   }
 }
 
