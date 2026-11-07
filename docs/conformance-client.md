@@ -284,9 +284,23 @@ The test serves its own `/.well-known/oauth-protected-resource/mcp`, because a r
 publishes that document and Keycloak does not — the identity provider is real, the resource
 metadata is the test's stand-in.
 
-**What is still not live:** the `authorization_code` grant needs a browser session (Keycloak
-redirects to a login form), so it is covered by the conformance harness's scripted servers
-instead. `jwt_bearer` needs an IdP that issues ID-JAGs, which Keycloak does not implement.
+`authorization_code` is live too, via a **login helper**: `src/oauth-live-authorization-code.e2e.test.ts`
+fronts the provider with a tiny server that drives its login form (cookies, the form's hidden
+fields) and then hands the agent the redirect it expects. Token issuance, PKCE verification and
+the JWKS remain the provider's.
+
+**Measured 2026-11-07, Keycloak 26.0** (public client `agent-ac`, redirect
+`http://127.0.0.1:8765/oauth/callback`, user alice):
+
+| Check                                                                                                  | Result |
+| ------------------------------------------------------------------------------------------------------ | ------ |
+| `authorize: "fetch"` completes the login through the helper                                            | ✅     |
+| The authorize request carried `response_type=code`, `code_challenge_method=S256`, a 43+ char challenge | ✅     |
+| The provider's code exchange returns a token whose `iss` is the realm                                  | ✅     |
+| `refresh()` re-requests and the provider issues a **different** access token (`jti` differs)           | ✅     |
+
+**Still not live:** `jwt_bearer` needs an IdP that issues ID-JAGs, which Keycloak does not
+implement.
 
 ## What running it found in the agent## What running it found in the agent
 
