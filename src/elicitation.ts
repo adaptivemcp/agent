@@ -202,12 +202,12 @@ export function validateValue(field: FieldSchema, value: unknown): void {
  * an answer the schema rejects is asked again once, then declines rather than sending
  * something the server would reject.
  */
-export async function readForm(
-  request: ElicitationRequest,
+/** One pass over the fields. Returns `null` when an answer is rejected twice. */
+async function collect(
+  fields: Record<string, FieldSchema>,
   ask: ElicitationAsk,
-  notify: (message: string) => void = () => {},
-): Promise<ElicitResult> {
-  const fields = properties(request.requestedSchema);
+  notify: (message: string) => void,
+): Promise<Record<string, unknown> | null> {
   const content: Record<string, unknown> = {};
   for (const [name, field] of Object.entries(fields)) {
     const suffix = "default" in field ? ` [${String(field.default)}]` : "";
@@ -220,13 +220,70 @@ export async function readForm(
         if (value !== undefined) content[name] = value;
         answered = true;
       } catch (error) {
-        if (attempt === 1) {
-          // Never send a value the schema rejects: declining is the honest failure.
-          return { action: "decline" };
-        }
+        if (attempt === 1) return null;
         // Reported out of band: the answer queue is for answers, not diagnostics.
         notify(`  ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+  return content;
+}
+
+/** The review block: every field with what will be sent (or that it is omitted). */
+export function renderReview(
+  request: ElicitationRequest,
+  content: Record<string, unknown>,
+): string {
+  const fields = properties(request.requestedSchema);
+  const lines = ["[elicitation] review"];
+  for (const name of Object.keys(fields)) {
+    const value = name in content ? JSON.stringify(content[name]) : "(omitted)";
+    lines.push(`  ${name}: ${value}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Walk the form one field at a time, then show what will be sent and ask before sending.
+ *
+ * The review step exists because elicitation is consent to hand a server specific values: a
+ * person who mistyped a field should see it before it leaves the machine, not discover it in
+ * the server's response. A rejected document is asked once more; a rejected *review* gives
+ * the whole form one more pass, and a second refusal declines rather than submitting.
+ *
+ * A single-field form skips the review: there is nothing to review that the prompt did not
+ * already show.
+ */
+export async function readForm(
+  request: ElicitationRequest,
+  ask: ElicitationAsk,
+  notify: (message: string) => void = () => {},
+): Promise<ElicitResult> {
+  const fields = properties(request.requestedSchema);
+  notify(renderForm(request));
+
+  let content = await collect(fields, ask, notify);
+  if (!content) return { action: "decline" };
+
+  if (Object.keys(fields).length > 1) {
+    let passes = 0;
+    let nonAnswers = 0;
+    while (passes < 2) {
+      notify(renderReview(request, content));
+      const answer = (await ask("  submit? [Y/n]: ")).trim().toLowerCase();
+      if (answer === "" || answer === "y" || answer === "yes") return { action: "accept", content };
+      if (answer === "n" || answer === "no") {
+        if (passes === 1) return { action: "decline" };
+        notify("[elicitation] re-entering the form");
+        const retry = await collect(fields, ask, notify);
+        if (!retry) return { action: "decline" };
+        content = retry;
+        passes += 1;
+        continue;
+      }
+      // Anything else is not a decision; ask again rather than guessing, but not forever.
+      nonAnswers += 1;
+      if (nonAnswers >= 3) return { action: "decline" };
     }
   }
   return { action: "accept", content };
