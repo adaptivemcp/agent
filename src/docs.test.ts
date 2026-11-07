@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 
 function markdownFiles(): string[] {
-  const files = [join(REPO, "README.md"), join(REPO, "AGENTS.md")];
+  const files = [join(REPO, "README.md"), join(REPO, "AGENTS.md"), join(REPO, "SECURITY.md")];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
@@ -111,6 +111,26 @@ describe("documentation guards", () => {
       expect(prose).toContain("**blocking**");
       expect(prose).not.toContain("continue-on-error: true");
     }
+  });
+
+  it("the security and roadmap claims match the files that exist", () => {
+    // Same failure mode as the conformance row: a doc saying "there is no SECURITY.md"
+    // after one lands reads as a deliberate, verified gap.
+    const tiers = readFileSync(join(REPO, "docs/sdk-tiers.md"), "utf8");
+    const security = join(REPO, "SECURITY.md");
+    const roadmap = join(REPO, "docs", "roadmap.md");
+
+    expect(existsSync(security), "SECURITY.md must exist").toBe(true);
+    expect(existsSync(roadmap), "docs/roadmap.md must exist").toBe(true);
+
+    // Both are reachable from the docs a reader actually starts at.
+    expect(readFileSync(join(REPO, "README.md"), "utf8")).toContain("SECURITY.md");
+    expect(readFileSync(join(REPO, "README.md"), "utf8")).toContain("docs/roadmap.md");
+
+    expect(tiers).not.toContain("There is no `SECURITY.md`");
+    expect(tiers).not.toContain("No roadmap document");
+    expect(tiers).toContain("docs/roadmap.md");
+    expect(readFileSync(security, "utf8")).toContain("Report a vulnerability");
   });
 
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {
