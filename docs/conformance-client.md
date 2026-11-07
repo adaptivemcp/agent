@@ -32,11 +32,13 @@ runs both scenarios on every push and pull request, writing
 `conformance-results/<scenario>/` and uploading it as an artifact (`checks.json`,
 `stdout.txt`, `stderr.txt`).
 
-It is **advisory** (`continue-on-error: true`) for the same reason QC's server job was at
-first: it fetches the harness through `npx`, so a registry or upstream-harness regression
-must not turn a green build red before we have seen whether a failure is ours. The offline
-e2e (`src/conformance-client.e2e.test.ts`) is the blocking check that keeps the adapter
-honest; this job is the one that talks to the real harness.
+It is **blocking**. The advisory phase did its job: both failures it surfaced were ours,
+not flaky infrastructure — a stale harness pin (0.1.11 connected a shared `Server` per
+request) and a `spawnSync` deadlock in the adapter. With both fixed, a red run here means
+the client regressed, which is exactly what a gate is for. The offline e2e
+(`src/conformance-client.e2e.test.ts`) still covers the same two paths without the
+network, so a registry outage is diagnosable from the job log rather than mistaken for a
+protocol failure.
 
 ```bash
 # the exact CI commands
