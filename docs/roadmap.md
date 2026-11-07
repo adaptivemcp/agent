@@ -28,9 +28,9 @@ What remains is not protocol work:
   policy does not;
 - token **exchange** in the other direction (accepting an ID-JAG from another app on the QC or
   MCP side) has no caller yet;
-- live `jwt_bearer` still needs an IdP that issues ID-JAGs (Keycloak does not); everything else
-  in the client is now exercised against a real provider, including the PKCE login through a
-  headless login helper.
+- `jwt_bearer` has no _live_ provider to point at — no tested provider issues ID-JAGs — so it
+  is covered end-to-end by an offline fixture with real JWT signing and verification
+  (`src/oauth-jwt-bearer.e2e.test.ts`), in addition to the conformance scenario.
 
 **Done when:** a caller delegates a scoped token to a second server as policy, not as a
 conformance check.
