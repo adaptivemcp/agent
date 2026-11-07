@@ -98,3 +98,52 @@ jobs:
       - name: Real QC MCP server e2e
         working-directory: agent
         run: pnpm test:integration
+
+  conformance-client:
+    # The agent is an MCP *client*; this checks its wire behaviour against the official
+    # harness rather than our own fixtures (docs/conformance-client.md). Advisory for now:
+    # it fetches the harness with `npx`, so a registry or harness regression must not turn
+    # a green build red. Promote to blocking once a failure has been seen to be ours.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout agent
+        uses: actions/checkout@v4
+        with:
+          path: agent
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: agent/pnpm-lock.yaml
+
+      - name: Install agent
+        working-directory: agent
+        run: pnpm install --frozen-lockfile
+
+      - name: Conformance (initialize)
+        working-directory: agent
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs" \
+            --scenario initialize \
+            --output-dir conformance-results/initialize
+
+      - name: Conformance (tools_call)
+        working-directory: agent
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --call" \
+            --scenario tools_call \
+            --output-dir conformance-results/tools_call
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-client-results
+          path: agent/conformance-results
