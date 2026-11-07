@@ -1,7 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
+  ElicitRequestSchema,
+  ElicitationCompleteNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import {
+  CompletionTracker,
   createElicitationHandler,
   type ElicitationAsk,
   type ElicitationMode,
@@ -35,6 +39,10 @@ export interface HttpToolsetOptions {
    * install its own reader (and remove it) without rebuilding the toolset.
    */
   elicitationAsk?: () => ElicitationAsk | undefined;
+  /** How long to wait for `notifications/elicitation/complete` after a URL confirmation. */
+  elicitationCompleteTimeoutMs?: number;
+  /** Where form/url/review lines go. Defaults to stderr; tests inject a collector. */
+  elicitationNotify?: (line: string) => void;
   auth?: {
     header: () => string;
     refresh?: () => Promise<string>;
@@ -59,6 +67,7 @@ export class HttpToolset implements ResourceToolset {
    * refreshed by `OAuthMiddleware` applies immediately.
    */
   private credentials: Record<string, unknown> | undefined;
+  private readonly completions = new CompletionTracker();
 
   constructor(
     readonly serverName: string,
@@ -91,16 +100,31 @@ export class HttpToolset implements ResourceToolset {
     );
     if (this.options.elicitation) {
       const mode = this.options.elicitation;
+      // A url-mode flow finishes out of band; the server says so with this notification.
+      client.setNotificationHandler(ElicitationCompleteNotificationSchema, (notification) => {
+        const id = notification.params.elicitationId;
+        if (typeof id === "string") this.completions.markComplete(id);
+      });
       client.setRequestHandler(ElicitRequestSchema, async (request) => {
         const params = request.params as {
           mode?: string;
           message?: string;
           requestedSchema?: unknown;
+          url?: string;
+          elicitationId?: string;
         };
         // The ask function is resolved per request: the REPL installs one while it owns the
         // terminal and removes it afterwards.
-        const handler = createElicitationHandler(mode, this.options.elicitationAsk?.(), (line) =>
-          console.error(line),
+        const handler = createElicitationHandler(
+          mode,
+          this.options.elicitationAsk?.(),
+          this.options.elicitationNotify ?? ((line) => console.error(line)),
+          {
+            waitForCompletion: (id, timeoutMs) => this.completions.waitFor(id, timeoutMs),
+            ...(this.options.elicitationCompleteTimeoutMs
+              ? { timeoutMs: this.options.elicitationCompleteTimeoutMs }
+              : {}),
+          },
         );
         return handler(params);
       });

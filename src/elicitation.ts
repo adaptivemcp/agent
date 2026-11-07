@@ -232,6 +232,50 @@ async function collect(
   return content;
 }
 
+/**
+ * Tracks `notifications/elicitation/complete` for URL-mode requests.
+ *
+ * A completion can arrive before the person confirms (the server saw it first) or after
+ * (while the client waits), so both orders are honoured: a completed id is remembered, and a
+ * waiter that finds nothing waits until it is marked or the bound expires. The wait never
+ * exceeds `timeoutMs`, and a timeout is not a failure — it means the server did not
+ * corroborate a confirmation the person gave.
+ */
+export class CompletionTracker {
+  private readonly completed = new Set<string>();
+  private readonly waiters = new Map<string, ((confirmed: boolean) => void)[]>();
+
+  /** Record a completion notification. Safe to call with an id nobody is waiting for. */
+  markComplete(elicitationId: string): void {
+    this.completed.add(elicitationId);
+    for (const resolve of this.waiters.get(elicitationId) ?? []) resolve(true);
+    this.waiters.delete(elicitationId);
+  }
+
+  /** Bounded wait for one id; resolves `true` when the server confirmed it. */
+  waitFor(elicitationId: string, timeoutMs: number): Promise<boolean> {
+    if (this.completed.has(elicitationId)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const list = this.waiters.get(elicitationId) ?? [];
+      list.push(resolve);
+      this.waiters.set(elicitationId, list);
+      const timer = setTimeout(
+        () => {
+          const pending = this.waiters.get(elicitationId) ?? [];
+          this.waiters.set(
+            elicitationId,
+            pending.filter((entry) => entry !== resolve),
+          );
+          resolve(false);
+        },
+        Math.max(1, timeoutMs),
+      );
+      // Do not hold a process open for a confirmation nobody needs.
+      timer.unref?.();
+    });
+  }
+}
+
 /** Only an absolute http(s) URL is worth showing a person as "open this". */
 export function isHttpUrl(value: string): boolean {
   try {
@@ -254,6 +298,10 @@ export async function readUrlRequest(
   request: ElicitationRequest,
   ask: ElicitationAsk,
   notify: (message: string) => void = () => {},
+  options: {
+    waitForCompletion?: (id: string, timeoutMs: number) => Promise<boolean>;
+    timeoutMs?: number;
+  } = {},
 ): Promise<ElicitResult> {
   const url = request.url ?? "";
   if (!isHttpUrl(url)) {
@@ -262,7 +310,22 @@ export async function readUrlRequest(
   }
   notify(`[elicitation] ${request.message ?? "The server needs you to open a URL."}\n  ${url}`);
   const answer = (await ask("  completed the flow there? [y/N]: ")).trim().toLowerCase();
-  return answer === "y" || answer === "yes" ? { action: "accept" } : { action: "decline" };
+  if (answer !== "y" && answer !== "yes") return { action: "decline" };
+
+  // The person's word is enough to accept, but the server usually knows too: wait briefly
+  // for its completion notification so the two do not silently disagree.
+  if (options.waitForCompletion && request.elicitationId) {
+    const confirmed = await options.waitForCompletion(
+      request.elicitationId,
+      options.timeoutMs ?? 2000,
+    );
+    notify(
+      confirmed
+        ? "[elicitation] completion confirmed by the server"
+        : "[elicitation] server did not confirm completion in time; using your answer",
+    );
+  }
+  return { action: "accept" };
 }
 
 /** The review block: every field with what will be sent (or that it is omitted). */
@@ -357,12 +420,16 @@ export function createElicitationHandler(
   mode: ElicitationMode,
   ask?: ElicitationAsk,
   notify?: (message: string) => void,
+  completion?: {
+    waitForCompletion?: (id: string, timeoutMs: number) => Promise<boolean>;
+    timeoutMs?: number;
+  },
 ): (request: ElicitationRequest) => Promise<ElicitResult> {
   return async (request) => {
     if (request.mode === "url") {
       // Only a person can do this; a headless host declines rather than claiming otherwise.
       if (mode !== "prompt" || !ask) return { action: "decline" };
-      return readUrlRequest(request, ask, notify);
+      return readUrlRequest(request, ask, notify, completion);
     }
     if (mode === "decline") return { action: "decline" };
     if (mode === "defaults")

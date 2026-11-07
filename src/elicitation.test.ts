@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CompletionTracker,
   coerceAnswer,
   createElicitationHandler,
   readForm,
@@ -164,6 +165,65 @@ describe("per-field re-edit from the review", () => {
     for (let i = 0; i < 6; i += 1) answers.push("edit name", `N${i}`);
     const result = await readForm(TWO, async () => answers.shift() ?? "");
     expect(result).toEqual({ action: "decline" });
+  });
+});
+
+describe("completion reconciliation", () => {
+  it("resolves immediately when the server confirmed before the wait", async () => {
+    const tracker = new CompletionTracker();
+    tracker.markComplete("el-1");
+    await expect(tracker.waitFor("el-1", 50)).resolves.toBe(true);
+  });
+
+  it("resolves when the notification arrives during the wait", async () => {
+    const tracker = new CompletionTracker();
+    const pending = tracker.waitFor("el-2", 1000);
+    setTimeout(() => tracker.markComplete("el-2"), 5);
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it("resolves false at the bound, without throwing on unknown ids", async () => {
+    const tracker = new CompletionTracker();
+    await expect(tracker.waitFor("never", 5)).resolves.toBe(false);
+    expect(() => tracker.markComplete("nobody-waits")).not.toThrow();
+  });
+
+  it("reports whether the server corroborated a url confirmation", async () => {
+    const notes: string[] = [];
+    const confirmed = await readUrlRequest(
+      { mode: "url", url: "https://auth.example.com/x", elicitationId: "el-3" },
+      async () => "y",
+      (line) => notes.push(line),
+      { waitForCompletion: async () => true, timeoutMs: 5 },
+    );
+    expect(confirmed).toEqual({ action: "accept" });
+    expect(notes.join("\n")).toContain("confirmed by the server");
+
+    const notes2: string[] = [];
+    await readUrlRequest(
+      { mode: "url", url: "https://auth.example.com/x", elicitationId: "el-4" },
+      async () => "y",
+      (line) => notes2.push(line),
+      { waitForCompletion: async () => false, timeoutMs: 5 },
+    );
+    expect(notes2.join("\n")).toContain("did not confirm completion in time");
+  });
+
+  it("does not wait when the person declines", async () => {
+    let waits = 0;
+    const result = await readUrlRequest(
+      { mode: "url", url: "https://auth.example.com/x", elicitationId: "el-5" },
+      async () => "n",
+      () => {},
+      {
+        waitForCompletion: async () => {
+          waits += 1;
+          return true;
+        },
+      },
+    );
+    expect(result).toEqual({ action: "decline" });
+    expect(waits).toBe(0);
   });
 });
 
