@@ -176,6 +176,43 @@ CI runs this scenario with `--auth` and without any expected-failures baseline. 
 baseline from the measurement above was deleted in the same change, because a stale entry
 fails the harness — which is how the removal was caught rather than forgotten.
 
+### The rest of the auth suite
+
+```
+scope-from-www-authenticate      14/14      pre-registration                13/13
+scope-from-scopes-supported      14/14      2025-03-26 metadata-backcompat  12/12
+scope-omitted-when-undefined     14/14      2025-03-26 endpoint-fallback     7/7
+scope-retry-limit                22/22      basic-cimd                      13/13
+offline-access-scope             14/14
+offline-access-not-supported     14/14
+
+client-credentials-basic          9/11      baselined — no client_credentials mode
+client-credentials-jwt            9/11      baselined — no signed-JWT assertion
+cross-app-access-complete-flow    9/11      baselined — no token exchange
+```
+
+Three more defects, all about a server that is older or more configured than the default:
+
+| Finding                                                                                 | Fix                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the client ignored the PRM's `scopes_supported`, so the grant asked for no scope at all | initial scopes now fall back challenge → `scopes_supported` → none                                                                                                                             |
+| a 2025-03-26 server publishes **no PRM**, and sometimes **no metadata**                 | absent PRM ⇒ the origin is the authorization server; absent metadata ⇒ the standard endpoints at the origin; a registration `404` falls back to a public identity instead of failing the login |
+| there was no way to be a **configured** client                                          | `oauth.clientId` + `oauth.clientSecretEnv` (secret from the environment, never argv) for pre-registration, and `oauth.clientMetadataUrl` for CIMD                                              |
+
+**CIMD and pre-registration are configuration, not cleverness.** Both scenarios hand the
+client an identity it cannot discover: a metadata-document URL, or an id/secret pair. The
+adapter passes them the way a deployment would — `CONFORMANCE_CLIENT_METADATA_URL`,
+`CONFORMANCE_CLIENT_ID`/`CONFORMANCE_CLIENT_SECRET` — and no credential is ever written into
+a server spec's `clientId`/argv.
+
+**The three baselined scenarios are extensions, and the reasons are specific.**
+`client-credentials-*` wants `grant_type=client_credentials` — machine-to-machine, with no
+user, no authorization request and no PKCE; that is a different authentication model
+(SEP-1046), and mixing it with the interactive flow would be worse than not having it.
+`cross-app-access-complete-flow` wants a token exchange into a second application, which is
+a delegation model this host has no caller for. The baseline makes a regression fail and a
+fix fail as _stale_ until the line is deleted.
+
 ## What running it found in the agent## What running it found in the agent
 
 The adapter's first version hung against a real HTTP server, and the cause was a genuine

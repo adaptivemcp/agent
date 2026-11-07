@@ -157,8 +157,24 @@ describe("documentation guards", () => {
     ]) {
       expect(ci, `CI must run ${scenario}`).toContain(scenario);
     }
-    // A baseline that is no longer needed is dead config; the file is gone.
-    expect(existsSync(join(REPO, "conformance-client-baseline.yml"))).toBe(false);
+    // The remaining baseline entries are the extension scenarios, and each is named in the
+    // docs with a reason. A baseline that drifts from the workflow is dead config.
+    const baseline = join(REPO, "conformance-client-baseline.yml");
+    if (!ci.includes("conformance-client-baseline.yml")) {
+      expect(existsSync(baseline)).toBe(false);
+      return;
+    }
+    expect(existsSync(baseline)).toBe(true);
+    const entries = readFileSync(baseline, "utf8");
+    for (const scenario of [
+      "auth/client-credentials-basic",
+      "auth/client-credentials-jwt",
+      "auth/cross-app-access-complete-flow",
+    ]) {
+      expect(entries, `baseline must list ${scenario}`).toContain(scenario);
+      expect(ci, `CI must run ${scenario}`).toContain(scenario);
+    }
+    expect(docs).toContain("baselined");
   });
 
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {

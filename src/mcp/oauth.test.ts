@@ -354,6 +354,60 @@ describe("OAuth discovery and authorization", () => {
     expect(parseChallenge('Bearer realm="mcp"')).toEqual({});
   });
 
+  it("uses scopes_supported when the challenge names no scope", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        resource: "https://host.example/mcp",
+        authorization_servers: ["https://host.example"],
+        scopes_supported: ["mcp:basic", "mcp:read"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+      },
+      "https://host.example/authorize": (url: string) => ({
+        redirect: `https://127.0.0.1/cb?code=c&state=${new URL(url).searchParams.get("state")}`,
+      }),
+      "https://host.example/token": { access_token: "scoped-token", token_type: "Bearer" },
+    });
+
+    await acquireToken(
+      "https://host.example/mcp",
+      { authorize: "fetch" },
+      { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+    );
+
+    const authorize = seen.find((url) => url.startsWith("https://host.example/authorize?"));
+    expect(authorize).toBeDefined();
+    expect(new URL(authorize as string).searchParams.get("scope")).toBe("mcp:basic mcp:read");
+  }, 20_000);
+
+  it("falls back to the issuer origin and standard endpoints on a 2025-03-26 server", async () => {
+    // No PRM and no metadata document: the pre-RFC behaviour is the server root.
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://legacy.example/authorize": (url: string) => ({
+        redirect: `https://127.0.0.1/cb?code=legacy-code&state=${new URL(url).searchParams.get("state")}`,
+      }),
+      "https://legacy.example/token": { access_token: "legacy-token", token_type: "Bearer" },
+      "https://legacy.example/register": { client_id: "legacy-client" },
+    });
+
+    const session = await acquireToken(
+      "https://legacy.example/mcp",
+      { authorize: "fetch" },
+      { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+    );
+
+    expect(session.header()).toBe("Bearer legacy-token");
+    expect(
+      seen.some((url) => url.startsWith("https://legacy.example/authorize?response_type=code")),
+    ).toBe(true);
+    expect(seen.some((url) => url.startsWith("https://legacy.example/token"))).toBe(true);
+  }, 20_000);
+
   it("builds RFC 9728 and RFC 8414 locations", () => {
     expect(protectedResourceUrl("https://host.example/mcp")).toBe(
       "https://host.example/.well-known/oauth-protected-resource/mcp",
@@ -377,3 +431,33 @@ describe("OAuth discovery and authorization", () => {
     ]);
   });
 });
+
+/**
+ * A `fetch` double driven by a URL map, for cases a real server makes awkward (a server
+ * that publishes nothing at all). Unknown URLs answer 404, which is what the discovery
+ * fallbacks are supposed to handle.
+ */
+function fakeFetch(
+  seen: string[],
+  routes: Record<string, object | ((url: string) => object)>,
+): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    seen.push(url);
+    const key = Object.keys(routes).find(
+      (candidate) => url === candidate || url.startsWith(`${candidate}?`),
+    );
+    const entry = key ? routes[key] : undefined;
+    const route =
+      typeof entry === "function" ? entry(url) : (entry as Record<string, unknown> | undefined);
+    if (!route) return new Response(JSON.stringify({ error: "not_found" }), { status: 404 });
+    if (typeof route.redirect === "string") {
+      return new Response(null, { status: 302, headers: { location: route.redirect } });
+    }
+    return new Response(JSON.stringify(route), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+}

@@ -96,11 +96,28 @@ const tsx = join(root, "node_modules", "tsx", "dist", "cli.mjs");
 // `--auth` opts the client into OAuth discovery and completes the redirect headlessly
 // (`authorize: "fetch"`), which is what the `auth/*` scenarios measure.
 const wantsAuth = args.includes("--auth");
-const spec = JSON.stringify(
-  wantsAuth
-    ? { name: "conformance", url, oauth: { authorize: "fetch" } }
-    : { name: "conformance", url },
-);
+// The pre-registration scenario supplies fixed credentials and no registration endpoint,
+// so the adapter passes them the way a deployment would: id in the spec, secret via env.
+const preRegistered = process.env.CONFORMANCE_CLIENT_ID
+  ? {
+      clientId: process.env.CONFORMANCE_CLIENT_ID,
+      clientSecretEnv: "CONFORMANCE_CLIENT_SECRET",
+    }
+  : {};
+const clientMetadataUrl = process.env.CONFORMANCE_CLIENT_METADATA_URL;
+const spec = JSON.stringify({
+  name: "conformance",
+  url,
+  ...(wantsAuth
+    ? {
+        oauth: {
+          authorize: "fetch",
+          ...preRegistered,
+          ...(clientMetadataUrl ? { clientMetadataUrl } : {}),
+        },
+      }
+    : {}),
+});
 
 // `--call` makes the adapter exercise the tool path: a stub model asks for the harness's
 // tool once. Without it the adapter only connects and lists tools (the `initialize` shape).

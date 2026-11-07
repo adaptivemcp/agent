@@ -271,9 +271,23 @@ async function main(): Promise<void> {
   for (const spec of serverSpecs) {
     if (!isHttpServerSpec(spec) || !spec.oauth) continue;
     try {
-      const session = await acquireToken(spec.url, spec.oauth, {
-        log: (message) => console.error(message),
-      });
+      // A pre-registered secret comes from the environment, so it never appears in argv or
+      // in a config file that gets committed.
+      const secretEnv = spec.oauth.clientSecretEnv;
+      const clientSecret = secretEnv ? process.env[secretEnv] : undefined;
+      if (secretEnv && !clientSecret) {
+        console.error(
+          `error: OAuth for server "${spec.serverName}" needs $${secretEnv} for the ` +
+            "pre-registered client secret",
+        );
+        process.exitCode = ExitCode.Config;
+        return;
+      }
+      const session = await acquireToken(
+        spec.url,
+        { ...spec.oauth, clientSecret },
+        { log: (message) => console.error(message) },
+      );
       spec.headers = { ...spec.headers, Authorization: session.header() };
       // Refresh on 401 rather than at a clock: the token endpoint is the authority on
       // expiry, and a refreshed token must reach the next request without reconnecting.
