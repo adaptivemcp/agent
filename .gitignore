@@ -13,3 +13,6 @@ tools-metadata.yaml
 
 # `prepare` writes the pending release (version + notes) here
 .release/
+
+# Client conformance output (CI artifact, docs/conformance-client.md)
+conformance-results/

@@ -25,6 +25,29 @@ The adapter runs `--list-tools` for the handshake scenario and a one-tool prompt
 `--call`, so no inference and no GPU are involved: the scenarios are about the MCP
 connection, not about what a model does with the answer.
 
+## In CI
+
+The `conformance-client` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+runs both scenarios on every push and pull request, writing
+`conformance-results/<scenario>/` and uploading it as an artifact (`checks.json`,
+`stdout.txt`, `stderr.txt`).
+
+It is **advisory** (`continue-on-error: true`) for the same reason QC's server job was at
+first: it fetches the harness through `npx`, so a registry or upstream-harness regression
+must not turn a green build red before we have seen whether a failure is ours. The offline
+e2e (`src/conformance-client.e2e.test.ts`) is the blocking check that keeps the adapter
+honest; this job is the one that talks to the real harness.
+
+```bash
+# the exact CI commands
+npx -y @modelcontextprotocol/conformance@0.1.16 client \
+  --command "node scripts/conformance-client.mjs" --scenario initialize \
+  --output-dir conformance-results/initialize
+npx -y @modelcontextprotocol/conformance@0.1.16 client \
+  --command "node scripts/conformance-client.mjs --call" --scenario tools_call \
+  --output-dir conformance-results/tools_call
+```
+
 ## Measured 2026-11-07
 
 ```
