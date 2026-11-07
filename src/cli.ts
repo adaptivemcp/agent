@@ -316,6 +316,11 @@ async function main(): Promise<void> {
   // A named mode is a policy for the whole run: it implies the tools it needs
   // (below) and contributes its paragraph to the system prompt.
   const implied = args.mode ? modeTools(args.mode) : { task: false, tasks: false };
+  // Listing commands print and exit; a remote toolset must be closed or its transport
+  // keeps the event loop alive.
+  const closeToolsets = async (): Promise<void> => {
+    await Promise.allSettled(toolsetList.map((toolset) => toolset.close()));
+  };
   const toolsetList: Toolset[] = [...toolsets];
   if (skills.length > 0) toolsetList.push(skillsToolset(skills));
   if (resources.length > 0) toolsetList.push(resourcesToolset(toolsets));
@@ -395,6 +400,10 @@ async function main(): Promise<void> {
       for (const spec of specs) {
         console.log(`${spec.name}\t${spec.serverName ?? ""}\t${spec.description ?? ""}`);
       }
+      // A remote toolset keeps its HTTP transport (and its keep-alive sockets) open, so a
+      // listing command that returns without closing hangs the process. Stdio never showed
+      // it because the child exits when the parent does.
+      await closeToolsets();
       return;
     }
 
@@ -612,6 +621,7 @@ async function main(): Promise<void> {
           loads: learnedLoads(),
         }),
       );
+      await closeToolsets();
       return;
     }
 
