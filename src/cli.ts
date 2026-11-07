@@ -171,9 +171,7 @@ async function main(): Promise<void> {
         });
       }
       writeTrust(record, trustFile);
-      console.log(
-        `[skills] vouched for ${args.skillsTrust.join(", ")} — recorded in ${trustFile}`,
-      );
+      console.log(`[skills] vouched for ${args.skillsTrust.join(", ")} — recorded in ${trustFile}`);
       if (!args.skillsList) return;
     }
 
@@ -591,9 +589,28 @@ async function main(): Promise<void> {
           : undefined,
     });
     const systemWithServers = context.text;
+    // Context loads are learned, not only printed: one bounded counter per kept section,
+    // so a later policy can say which items earned their tokens (ADR-005 P1). Best-effort
+    // by contract — a store without the optional methods must not stop a run.
+    for (const section of context.sections) {
+      runtime.adaptive.memory.recordContext?.({
+        item: section.id,
+        kind: section.kind,
+        reason: section.reason,
+        tokens: section.tokens,
+        sessionId,
+      });
+    }
+    const learnedLoads = (): Map<string, number> =>
+      new Map(
+        (runtime.adaptive.memory.contextStats?.() ?? []).map((stat) => [stat.item, stat.loads]),
+      );
     if (args.listContext) {
       console.log(
-        formatContextCatalog(catalogFor(), { summary: contextSummary(context).trim() }),
+        formatContextCatalog(catalogFor(), {
+          summary: contextSummary(context).trim(),
+          loads: learnedLoads(),
+        }),
       );
       return;
     }
@@ -759,7 +776,10 @@ async function main(): Promise<void> {
         // The REPL's /context and the run summary describe the same prompt, so they
         // print the same numbers rather than two near-identical ones.
         contextReport: () =>
-          formatContextCatalog(contextCatalog, { summary: contextSummary(context).trim() }),
+          formatContextCatalog(contextCatalog, {
+            summary: contextSummary(context).trim(),
+            loads: learnedLoads(),
+          }),
         decision: () => runtime.lastDecisionSummary(),
         cost: () => runtime.costSummary(),
         policy: () => runtime.serverPolicySummary(),

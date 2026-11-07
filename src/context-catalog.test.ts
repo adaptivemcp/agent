@@ -119,6 +119,30 @@ describe("context catalog", () => {
     expect(text.indexOf("item(s)")).toBeLessThan(text.indexOf("context_kinds"));
   });
 
+  it("adds a loads column when the store reports load counts", () => {
+    const text = formatContextCatalog(catalogInput(), {
+      loads: new Map([
+        ["base", 3],
+        ["deploy", 1],
+      ]),
+    });
+
+    expect(text.split("\n")[0]).toBe("state\tkind\tname\tsource\tcost\tloads");
+    // A section that is in the prompt and has been loaded before.
+    expect(text).toContain("loaded\tsection\tbase\tbuilt-in\t12tok(est)\t3");
+    // A discovered skill the store has seen once.
+    expect(text).toContain("discovered\tskill\tdeploy\tproject (/skills/deploy)\t6tok(est)\t1");
+    // Never loaded is reported honestly as zero, not omitted.
+    expect(text).toContain("discovered\tskill\taudit\tproject (/skills/audit)\t6tok(est)\t0");
+  });
+
+  it("omits the column entirely without load counts, so old output is unchanged", () => {
+    const text = formatContextCatalog(catalogInput());
+
+    expect(text).not.toContain("loads");
+    expect(text.split("\n")[0]).not.toContain("state\tkind");
+  });
+
   it("says so when there is nothing to list", () => {
     const empty: ContextItem[] = [];
     expect(formatContextCatalog(empty)).toBe("[context] nothing discovered");

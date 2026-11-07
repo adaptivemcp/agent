@@ -269,6 +269,12 @@ round trip per server, so it only happens when the catalog is asked for — a on
 run never pays it. Per-item load tracking (a skill read at step 4) needs context
 telemetry and is deliberately not claimed yet; the listing would go stale.
 
+**Context-load telemetry** now exists: after assembly the host records every kept section
+through `runtime.adaptive.memory.recordContext?.()` (best-effort — the store's methods are
+optional), and `formatContextCatalog(items, { loads })` prints how often each item has been
+loaded. That is the first half of ADR-005's P1 on the host side; selection still does not
+read it, because the benchmark has not shown selection to be worth building (#75).
+
 **MCP resources** (`src/resources.ts`) are the first context source that is external to
 the host: the servers list them, the prompt carries a one-line index (`name: uri`), and
 `resources_read_resource` reads one on demand, with `offset`/`limit` for a partial read.
