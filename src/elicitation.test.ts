@@ -4,6 +4,7 @@ import {
   createElicitationHandler,
   readForm,
   renderForm,
+  renderReview,
   schemaDefaults,
   validateValue,
 } from "./elicitation.js";
@@ -105,6 +106,94 @@ describe("elicitation handler", () => {
     const result = await readForm(REQUEST, async () => answers.shift() ?? "");
 
     expect(result).toEqual({ action: "decline" });
+  });
+});
+
+describe("whole-form review", () => {
+  const TWO = {
+    message: "Confirm",
+    requestedSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, age: { type: "integer" } },
+    },
+  };
+
+  it("shows the form, then the values, then asks before submitting", async () => {
+    const asked: string[] = [];
+    const notes: string[] = [];
+    const answers = ["Ada", "41", "y"];
+    const result = await readForm(
+      TWO,
+      async (question) => {
+        asked.push(question);
+        return answers.shift() ?? "";
+      },
+      (line) => notes.push(line),
+    );
+
+    expect(result).toEqual({ action: "accept", content: { name: "Ada", age: 41 } });
+    // The form is rendered before any question, with every field visible.
+    expect(notes[0]).toContain("[elicitation] Confirm");
+    expect(notes[0]).toContain("name (string)");
+    expect(notes[0]).toContain("age (integer)");
+    // The review shows exactly what will be sent.
+    expect(notes.some((line) => line.includes('name: "Ada"') && line.includes("age: 41"))).toBe(
+      true,
+    );
+    expect(asked.at(-1)).toContain("submit?");
+  });
+
+  it("re-enters the form once when the review is rejected, then accepts", async () => {
+    const notes: string[] = [];
+    const answers = ["Ada", "41", "n", "Grace", "85", "y"];
+    const result = await readForm(
+      TWO,
+      async () => answers.shift() ?? "",
+      (line) => notes.push(line),
+    );
+
+    expect(result).toEqual({ action: "accept", content: { name: "Grace", age: 85 } });
+    expect(notes).toContain("[elicitation] re-entering the form");
+  });
+
+  it("declines when the review is rejected twice, sending nothing", async () => {
+    const answers = ["Ada", "41", "n", "Grace", "85", "n"];
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "decline" });
+  });
+
+  it("asks again on a non-answer instead of treating it as consent", async () => {
+    const answers = ["Ada", "41", "maybe", "y"];
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "accept", content: { name: "Ada", age: 41 } });
+  });
+
+  it("declines instead of looping on a review answer that is not a decision", async () => {
+    const answers = ["Ada", "41", "maybe", "dunno", "?"];
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "decline" });
+  });
+
+  it("skips the review for a single field", async () => {
+    const asked: string[] = [];
+    const result = await readForm(
+      {
+        requestedSchema: { type: "object", properties: { name: { type: "string" } } },
+      },
+      async (question) => {
+        asked.push(question);
+        return "Ada";
+      },
+    );
+
+    expect(result).toEqual({ action: "accept", content: { name: "Ada" } });
+    expect(asked.some((line) => line.includes("submit?"))).toBe(false);
+  });
+
+  it("renders omitted fields as omitted, not as a guess", () => {
+    const text = renderReview(TWO, { name: "Ada" });
+    expect(text).toContain('name: "Ada"');
+    expect(text).toContain("age: (omitted)");
   });
 });
 

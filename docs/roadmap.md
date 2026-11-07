@@ -24,20 +24,19 @@ scenario passes, and the baseline file is empty (and therefore deleted).
 
 ### 2. Elicitation ergonomics
 
-`--elicitation prompt` reads a form line by line (terminal or the REPL's own reader):
-schema-typed answers, defaults offered, one retry on a rejected answer, and a decline rather
-than a guessed value. **Arrays now round-trip** as parsed JSON instead of the raw typed
-string — the one real defect the "nested fields" idea turned out to contain. Nested objects
-are outside the elicitation form schema (it is flat, and the SDK enforces that), so they are
-handled defensively if a peer sends one but are not a protocol feature to chase.
+`--elicitation prompt` now renders the **whole form** before asking, then shows a review of
+exactly what will be sent and asks to submit — with one re-entry if the review is rejected and
+a decline (not a submission) after a second refusal. Array answers are parsed and validated;
+a non-answer at the review is asked again, and three non-answers decline rather than loop.
 
-Still open, and smaller than the label suggests:
+What is left is narrower again:
 
-- a whole-form render with back-editing, instead of one field at a time;
-- `mode: "url"` requests declined rather than surfaced as a link the person can open.
+- `mode: "url"` requests are declined instead of surfaced as a link the person can open;
+- a single-field form skips the review by design (nothing to review), and there is no
+  back-edit of one field from the review — only a full re-entry.
 
-**Done when:** the terminal shows the whole form (or a review step) and an `url` request can
-be opened from the CLI.
+**Done when:** a `url` elicitation can be opened from the CLI (or explicitly refused with a
+reason the server understands), and the review can re-open a single field.
 
 ### 3. Roadmap and security posture stay current
 
