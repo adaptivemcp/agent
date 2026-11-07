@@ -16,39 +16,48 @@ import { HttpToolset, schemaDefaults } from "./http.js";
  */
 function elicitingServer(
   onResult: (result: unknown) => void,
-  shape: "flat" | "array" = "flat",
+  shape: "flat" | "array" | "url" = "flat",
 ): McpServer {
   const server = new McpServer({ name: "elicitation-test", version: "0.0.0" });
   server.registerTool(
     "ask",
     { description: "Ask the client for input", inputSchema: {} },
     async () => {
+      if (shape === "url") {
+        const urlResult = await server.server.elicitInput({
+          mode: "url",
+          message: "Authorize this device",
+          url: "https://auth.example.com/device?code=ABCD",
+          elicitationId: "el-url-1",
+        });
+        onResult(urlResult);
+        return { content: [{ type: "text" as const, text: "asked for url" }] };
+      }
       const result = await server.server.elicitInput({
         message: "Please confirm",
         // The SDK's form schema type is shallow; nested objects/arrays are still valid JSON
         // Schema and are what a real server sends.
-        requestedSchema: (
-          shape === "array"
-            ? {
-                type: "object",
-                properties: {
-                  // The spec's form schema is flat with primitive arrays; the SDK enforces
-                  // that on its own server, which is why this uses an array field and not a
-                  // nested object.
-                  tags: { type: "array", items: { type: "string", enum: ["a", "b", "c"] } },
-                },
-                required: [],
-              }
-            : {
-                type: "object",
-                properties: {
-                  name: { type: "string", default: "John Doe" },
-                  age: { type: "integer", default: 30 },
-                  newsletter: { type: "boolean", default: true },
-                  noDefault: { type: "string" },
-                },
-                required: [],
-              }) as never,
+        requestedSchema: (shape === "array"
+          ? {
+              type: "object",
+              properties: {
+                // The spec's form schema is flat with primitive arrays; the SDK enforces
+                // that on its own server, which is why this uses an array field and not a
+                // nested object.
+                tags: { type: "array", items: { type: "string", enum: ["a", "b", "c"] } },
+              },
+              required: [],
+            }
+          : {
+              type: "object",
+              properties: {
+                name: { type: "string", default: "John Doe" },
+                age: { type: "integer", default: 30 },
+                newsletter: { type: "boolean", default: true },
+                noDefault: { type: "string" },
+              },
+              required: [],
+            }) as never,
       });
       onResult(result);
       return { content: [{ type: "text" as const, text: "asked" }] };
@@ -59,7 +68,7 @@ function elicitingServer(
 
 async function start(
   onResult: (result: unknown) => void,
-  shape: "flat" | "array" = "flat",
+  shape: "flat" | "array" | "url" = "flat",
 ): Promise<{ url: string; server: Server; close: () => Promise<void> }> {
   // One server and one transport for the whole test: elicitation depends on session state
   // (the server records the client's capabilities at `initialize`), so a fresh instance per
@@ -182,6 +191,34 @@ describe("elicitation", () => {
 
     expect(received?.action).toBe("accept");
     expect(received?.content).toEqual({ tags: ["a", "b"] });
+  }, 30_000);
+
+  it("surfaces a url-mode request and accepts only after the person confirms", async () => {
+    let received: { action?: string } | undefined;
+    const server = await start((result) => {
+      received = result as typeof received;
+    }, "url");
+    running = server.server;
+    const asked: string[] = [];
+    const toolset = new HttpToolset("remote", {
+      serverName: "remote",
+      url: server.url,
+      elicitation: "prompt",
+      elicitationAsk: () => async (question) => {
+        asked.push(question);
+        return "y";
+      },
+    });
+
+    try {
+      const result = await toolset.callTool("ask", {});
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+    } finally {
+      await toolset.close();
+    }
+
+    expect(received?.action).toBe("accept");
+    expect(asked.at(-1)).toContain("completed the flow");
   }, 30_000);
 
   it("declines explicitly instead of accepting", async () => {
