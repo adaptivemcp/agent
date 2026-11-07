@@ -289,11 +289,16 @@ async function main(): Promise<void> {
       }
       const idToken = spec.oauth.idTokenEnv ? process.env[spec.oauth.idTokenEnv] : undefined;
       const identityProvider =
-        spec.oauth.grant === "jwt_bearer" && idToken && spec.oauth.idpTokenEndpoint
+        spec.oauth.grant === "jwt_bearer" &&
+        idToken &&
+        (spec.oauth.idpTokenEndpoint || spec.oauth.idpIssuer)
           ? {
               clientId: spec.oauth.idpClientId ?? spec.oauth.clientId ?? "agent",
               idToken,
-              tokenEndpoint: spec.oauth.idpTokenEndpoint,
+              ...(spec.oauth.idpTokenEndpoint
+                ? { tokenEndpoint: spec.oauth.idpTokenEndpoint }
+                : {}),
+              ...(spec.oauth.idpIssuer ? { issuer: spec.oauth.idpIssuer } : {}),
               ...(spec.oauth.idpAudience ? { audience: spec.oauth.idpAudience } : {}),
             }
           : undefined;
@@ -348,7 +353,9 @@ async function main(): Promise<void> {
       ? new HttpToolset(spec.serverName, {
           ...spec,
           ...(args.elicitation ? { elicitation: args.elicitation } : {}),
-          ...(askElicitation ? { elicitationAsk: () => elicitationAskRef.current ?? askElicitation } : {}),
+          ...(askElicitation
+            ? { elicitationAsk: () => elicitationAskRef.current ?? askElicitation }
+            : {}),
         })
       : new StdioToolset(spec.serverName, spec),
   );

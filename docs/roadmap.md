@@ -12,17 +12,22 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 ### 1. Cross-application access: done, and what it needs next
 
 `oauth.grant: "jwt_bearer"` implements SEP-990's managed flow: the operator's IdP ID token is
-exchanged for an **ID-JAG** (RFC 8693) and presented as the `jwt-bearer` assertion. With that,
-`auth/cross-app-access-complete-flow` passes 9/9 and **the conformance baseline file is gone** —
+exchanged for an **ID-JAG** (RFC 8693) and presented as the `jwt-bearer` assertion.
+`auth/cross-app-access-complete-flow` passes 9/9 and the conformance baseline file is gone —
 every client scenario the harness ships now passes.
+
+The IdP token endpoint is **discovered** from the provider's
+`{issuer}/.well-known/openid-configuration` when it is not configured, and the discovered
+value is reused for a refresh rather than re-fetched. An issuer with no OIDC document fails
+with the document URL in the message instead of guessing `/token`.
 
 What remains is not protocol work:
 
 - a host feature that _delegates_ on purpose (app A acting for a user in app B) still has to
   choose the identity provider and decide when delegation is allowed; the grant exists, the
   policy does not;
-- the IdP discovery in this implementation takes the token endpoint from configuration. Reading
-  it from the IdP's OIDC document is a small gap, deliberately left until a real IdP is wired.
+- token **exchange** in the other direction (accepting an ID-JAG from another app on the QC or
+  MCP side) has no caller yet.
 
 **Done when:** a caller delegates a scoped token to a second server as policy, not as a
 conformance check.

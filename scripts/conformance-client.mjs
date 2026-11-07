@@ -134,6 +134,7 @@ const crossAppAccess = crossApp
       clientSecretEnv: "CONFORMANCE_CLIENT_SECRET",
       idTokenEnv: "CONFORMANCE_ID_TOKEN",
       idpTokenEndpoint: context.idp_token_endpoint,
+      idpIssuer: context.idp_issuer,
       idpClientId: context.idp_client_id,
     }
   : {};

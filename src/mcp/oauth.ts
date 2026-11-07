@@ -64,8 +64,10 @@ export interface OAuthOptions {
   identityProvider?: {
     clientId: string;
     idToken: string;
-    /** The IdP token endpoint (token exchange, RFC 8693). */
-    tokenEndpoint: string;
+    /** The IdP issuer. Used to discover the token endpoint when it is not configured. */
+    issuer?: string;
+    /** The IdP token endpoint (token exchange, RFC 8693). Discovered when omitted. */
+    tokenEndpoint?: string;
     /** Audience for the exchange — the MCP authorization server's issuer. */
     audience?: string;
   };
@@ -169,12 +171,11 @@ async function applyClientAuth(
   if (method === "client_secret_post" && clientSecret) body.set("client_secret", clientSecret);
   if (method === "private_key_jwt") {
     if (!clientPrivateKey) {
-      throw new Error("OAuth: the server requires private_key_jwt but no private key is configured");
+      throw new Error(
+        "OAuth: the server requires private_key_jwt but no private key is configured",
+      );
     }
-    body.set(
-      "client_assertion_type",
-      "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-    );
+    body.set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
     body.set("client_assertion", privateKeyAssertion(clientId, clientPrivateKey, audience));
   }
   return {};
@@ -184,7 +185,11 @@ async function applyClientAuth(
  * A short-lived ES256 assertion (RFC 7523). `iss` and `sub` are the client id because this
  * authenticates the *client*, not a user; `aud` is the authorization server.
  */
-export function privateKeyAssertion(clientId: string, privateKeyPem: string, audience: string): string {
+export function privateKeyAssertion(
+  clientId: string,
+  privateKeyPem: string,
+  audience: string,
+): string {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })));
   const payload = base64url(
@@ -331,17 +336,13 @@ export async function acquireToken(
   // mint another identity it may not support (the scenario that has no registration
   // endpoint is exactly this case).
   if (!options.clientId && !useCimd && as.registration_endpoint) {
-    const registration = await registerOrSkip(
-      fetchImpl,
-      as.registration_endpoint,
-      {
-        client_name: options.clientName ?? "Adaptive MCP agent",
-        redirect_uris: [options.redirectUri ?? DEFAULT_REDIRECT_URI],
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-        token_endpoint_auth_method: "none",
-      },
-    );
+    const registration = await registerOrSkip(fetchImpl, as.registration_endpoint, {
+      client_name: options.clientName ?? "Adaptive MCP agent",
+      redirect_uris: [options.redirectUri ?? DEFAULT_REDIRECT_URI],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
     if (!registration.client_id) {
       throw new Error("OAuth: registration response has no client_id");
     }
@@ -364,7 +365,33 @@ export async function acquireToken(
     if (!idp) {
       throw new Error("OAuth: jwt_bearer needs identityProvider (id token + token endpoint)");
     }
-    if (!as.token_endpoint_auth_methods_supported?.includes("client_secret_basic") && !clientSecret) {
+    // The token endpoint is discovered from the provider's OIDC document when the operator
+    // has not pinned it. Discovered once per session: a refresh must not re-hit discovery.
+    let idpTokenEndpoint = idp.tokenEndpoint;
+    const tokenEndpointFor = async (): Promise<string> => {
+      if (idpTokenEndpoint) return idpTokenEndpoint;
+      if (!idp.issuer) {
+        throw new Error(
+          "OAuth: jwt_bearer needs identityProvider.tokenEndpoint or identityProvider.issuer",
+        );
+      }
+      const documentUrl = `${idp.issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
+      const document = await getJson<{ token_endpoint?: string }>(
+        fetchImpl,
+        documentUrl,
+        "identity-provider metadata",
+      );
+      if (!document.token_endpoint) {
+        throw new Error(`OAuth: ${documentUrl} publishes no token_endpoint`);
+      }
+      idpTokenEndpoint = document.token_endpoint;
+      log(`[oauth] ${new URL(resourceUrl).host}: IdP token endpoint discovered`);
+      return idpTokenEndpoint;
+    };
+    if (
+      !as.token_endpoint_auth_methods_supported?.includes("client_secret_basic") &&
+      !clientSecret
+    ) {
       throw new Error(
         "OAuth: jwt_bearer needs a pre-registered client (client id + secret) for the " +
           "authorization server",
@@ -383,7 +410,7 @@ export async function acquireToken(
       });
       const exchanged = await postForm<{ access_token?: string }>(
         fetchImpl,
-        idp.tokenEndpoint,
+        await tokenEndpointFor(),
         exchange,
         "ID token exchange",
       );
@@ -446,8 +473,7 @@ export async function acquireToken(
       );
       return tokenRequest(fetchImpl, tokenEndpoint, body, headers);
     };
-    const initial =
-      options.scopes ?? (prm?.scopes_supported ? prm.scopes_supported : []);
+    const initial = options.scopes ?? (prm?.scopes_supported ? prm.scopes_supported : []);
     let machine = await requestToken(initial);
     return {
       header: () => `${machine.tokenType} ${machine.accessToken}`,
