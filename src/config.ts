@@ -37,8 +37,10 @@ export interface HttpServerOptions {
     grant?: "authorization_code" | "client_credentials" | "jwt_bearer";
     /** Env var holding the operator's IdP ID token (SEP-990). */
     idTokenEnv?: string;
-    /** The IdP token endpoint (RFC 8693 token exchange). */
+    /** The IdP token endpoint (RFC 8693 token exchange); discovered from the issuer if omitted. */
     idpTokenEndpoint?: string;
+    /** The IdP issuer, used for OIDC discovery of the token endpoint. */
+    idpIssuer?: string;
     /** The IdP client id. */
     idpClientId?: string;
     /** Audience for the exchange; defaults to the MCP authorization server's issuer. */
@@ -159,6 +161,7 @@ function parseServerJson(spec: string): ServerSpec {
         "clientPrivateKeyEnv",
         "idTokenEnv",
         "idpTokenEndpoint",
+        "idpIssuer",
         "idpClientId",
         "idpAudience",
       ] as const) {

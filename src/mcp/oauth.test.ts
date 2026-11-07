@@ -457,6 +457,145 @@ describe("OAuth discovery and authorization", () => {
     expect(seen.some((url) => url.includes("/authorize"))).toBe(false);
   }, 20_000);
 
+  it("discovers the IdP token endpoint from its OIDC document", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+        token_endpoint_auth_methods_supported: ["client_secret_basic"],
+      },
+      "https://idp.example/.well-known/openid-configuration": {
+        issuer: "https://idp.example",
+        token_endpoint: "https://idp.example/token",
+      },
+      "https://idp.example/token": { access_token: "discovered-id-jag" },
+      "https://host.example/token": { access_token: "mcp-token", token_type: "Bearer" },
+    });
+
+    const session = await acquireToken(
+      "https://host.example/mcp",
+      {
+        authorize: "fetch",
+        grant: "jwt_bearer",
+        clientId: "svc",
+        clientSecret: "s3cret",
+        identityProvider: {
+          clientId: "idp-client",
+          idToken: "idp-id-token",
+          issuer: "https://idp.example",
+        },
+      },
+      { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+    );
+
+    expect(session.header()).toBe("Bearer mcp-token");
+    expect(seen).toContain("https://idp.example/.well-known/openid-configuration");
+    // The exchange used the discovered endpoint, not a guessed `/token`.
+    expect(seen.some((url) => url.startsWith("https://idp.example/token"))).toBe(true);
+  }, 20_000);
+
+  it("uses the configured IdP endpoint without consulting discovery", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+        token_endpoint_auth_methods_supported: ["client_secret_basic"],
+      },
+      "https://idp.example/pinned/token": { access_token: "pinned-id-jag" },
+      "https://host.example/token": { access_token: "mcp-token", token_type: "Bearer" },
+    });
+
+    await acquireToken(
+      "https://host.example/mcp",
+      {
+        authorize: "fetch",
+        grant: "jwt_bearer",
+        clientId: "svc",
+        clientSecret: "s3cret",
+        identityProvider: {
+          clientId: "idp-client",
+          idToken: "idp-id-token",
+          issuer: "https://idp.example",
+          tokenEndpoint: "https://idp.example/pinned/token",
+        },
+      },
+      { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+    );
+
+    expect(seen.some((url) => url.includes("openid-configuration"))).toBe(false);
+    expect(seen.some((url) => url.startsWith("https://idp.example/pinned/token"))).toBe(true);
+  }, 20_000);
+
+  it("reports a missing IdP OIDC document instead of guessing an endpoint", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+      },
+    });
+
+    await expect(
+      acquireToken(
+        "https://host.example/mcp",
+        {
+          authorize: "fetch",
+          grant: "jwt_bearer",
+          clientId: "svc",
+          clientSecret: "s3cret",
+          identityProvider: {
+            clientId: "idp-client",
+            idToken: "idp-id-token",
+            issuer: "https://idp.example",
+          },
+        },
+        { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+      ),
+    ).rejects.toThrow(/returned 404/);
+  }, 20_000);
+
+  it("refuses jwt_bearer with neither an IdP endpoint nor an issuer", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+      },
+    });
+
+    await expect(
+      acquireToken(
+        "https://host.example/mcp",
+        {
+          authorize: "fetch",
+          grant: "jwt_bearer",
+          clientId: "svc",
+          clientSecret: "s3cret",
+          identityProvider: { clientId: "idp-client", idToken: "idp-id-token" },
+        },
+        { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+      ),
+    ).rejects.toThrow(/tokenEndpoint or identityProvider.issuer/);
+  }, 20_000);
+
   it("refuses jwt_bearer without an identity provider", async () => {
     const seen: string[] = [];
     const fetchImpl = fakeFetch(seen, {
