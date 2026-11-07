@@ -13,11 +13,11 @@ the adapter: it reads that URL and runs the agent CLI against it.
 
 ```bash
 # protocol handshake + discovery (no model involved)
-npx @modelcontextprotocol/conformance@0.1.11 client \
+npx @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs" --scenario initialize
 
 # tool call path: the adapter stands in a scripted model that asks for the tool once
-npx @modelcontextprotocol/conformance@0.1.11 client \
+npx @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs --call" --scenario tools_call
 ```
 
@@ -30,28 +30,31 @@ connection, not about what a model does with the answer.
 ```
 $ conformance client --command "node scripts/conformance-client.mjs" --scenario initialize
 [ mcp-client-initialization ] SUCCESS Validates that MCP client properly initializes with server
-Passed: 1/1, 0 failed
-✅ OVERALL: PASSED
+Passed: 1/1 — ✅ OVERALL: PASSED
+
+$ conformance client --command "node scripts/conformance-client.mjs --call" --scenario tools_call
+[tool-add-numbers] SUCCESS Validates that the add_numbers tool works correctly
+Passed: 1/1 — ✅ OVERALL: PASSED
 ```
 
-`initialize` passes: the client negotiates the protocol version, declares its capabilities
-(including the `dev.adaptivemcp/tools-metadata` extension) and completes the handshake.
+**Both client scenarios pass.** The client negotiates the protocol version, declares its
+capabilities (including the `dev.adaptivemcp/tools-metadata` extension), lists tools,
+reads a resource, and — in `tools_call` — actually calls the harness's `add_numbers` tool
+and returns its result.
 
-**`tools_call` does not pass yet, and not because of this client.** The harness's scripted
-server answers the first `POST /mcp` and then refuses the next one:
+Getting there took two fixes, both recorded because each looked like a client bug:
 
-```
-Sent 500 response for POST /mcp (method: initialize)
-StreamableHTTPError: Streamable HTTP error: Error POSTing to endpoint:
-  Error: Already connected to a transport. Call close() before connecting to a new transport
-```
+1. **The harness's pinned 0.1.11 could not serve a session.** Its route created a transport
+   per request but connected a _shared_ `Server`, so the second `POST /mcp` failed with
+   `Already connected to a transport`. **0.1.16 fixes this**; the pin was the problem, not
+   the client.
+2. **The adapter deadlocked itself in `--call` mode.** It used `spawnSync`, which blocks the
+   event loop that its own scripted model server runs on — so the client waited for a model
+   reply that could not be produced, and the harness reported "client timed out". The
+   adapter now spawns asynchronously.
 
-Its handler calls `server.connect(transport)` per request, so the second request of a
-session (`notifications/initialized`, then `tools/list`, then `tools/call`) hits a server
-that is still connected. A single-request scenario passes; a multi-request one cannot. That
-is a harness limitation to work around or upstream, and it is recorded rather than papered
-over — the adapter and its `--call` mode are ready for it once the harness can serve a
-session.
+No proxy was needed. The workaround under consideration (a loopback proxy holding one
+upstream session) would have hidden both causes instead of fixing them.
 
 ## What running it found in the agent
 
@@ -61,12 +64,12 @@ child exits with the parent, so the leak never showed; a remote toolset keeps it
 transport (and keep-alive sockets) open, and the process never exits. `--list-tools` and
 `--list-context` now close every toolset before returning, and
 `src/conformance-client.e2e.test.ts` reproduces the harness contract offline so the adapter
-cannot silently rot. The multi-request gap is tracked as [#99](https://github.com/adaptivemcp/agent/issues/99).
+cannot silently rot. Agent#99 tracked the multi-request gap and is now closed.
 
 ## Scope
 
 - Covered: one live server exercised over Streamable HTTP, with the client's own handshake
   judged by the harness.
 - Not covered: OAuth client flows (`auth/*` scenarios) — the agent supports a static token
-  and `OAuthMiddleware`, but the scenarios need an authorization server the harness runs;
-  and multi-request scenarios until the harness can serve them.
+  and `OAuthMiddleware`, but those scenarios need an authorization server the harness runs.
+  The multi-request gap is closed: `tools_call` passes on 0.1.16.

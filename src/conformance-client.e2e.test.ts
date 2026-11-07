@@ -93,6 +93,37 @@ describe("conformance client adapter", () => {
     expect(stdout).toContain("echo");
   }, 60_000);
 
+  it("calls a tool when --call asks the scripted model for one", async () => {
+    const { url, server } = await startServer();
+    running = server;
+
+    const child = spawn(
+      process.execPath,
+      [join(root, "scripts", "conformance-client.mjs"), "--call", url],
+      {
+        cwd: root,
+        // The local server's tool is `echo`, namespaced by the configured server name.
+        env: { ...process.env, CONFORMANCE_TOOL: "conformance_echo" },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const code = await new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+      child.on("close", (status) => {
+        clearTimeout(timer);
+        resolve(status);
+      });
+    });
+
+    expect(code, stderr).toBe(0);
+    // The tool ran through the ordinary path and its result came back to the model.
+    expect(stdout).toContain("conformance_echo");
+    expect(stdout).toContain("stop=completed");
+  }, 60_000);
+
   it("exits with a usage error when the harness passes no URL", () => {
     const run = spawnSync(process.execPath, [join(root, "scripts", "conformance-client.mjs")], {
       cwd: root,
