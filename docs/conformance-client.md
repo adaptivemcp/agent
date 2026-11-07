@@ -254,6 +254,40 @@ That distinction is worth stating: a scenario run without the interaction it mea
 look like a defect. The adapter takes `--call`/`--auth`/`--elicitation` so the scenario is
 given the chance to exercise what it grades.
 
+## Against a real identity provider
+
+The harness runs **scripted** servers: it proves protocol shape, not interoperability with
+another implementation. `src/oauth-live.e2e.test.ts` talks to a live provider instead and is
+skipped unless the environment names one.
+
+**Measured 2026-11-07, Keycloak 26.0** (realm `agent`, service-account client `agent-cli`,
+audience `agent-mcp`, scope `agent:mcp`):
+
+| Check                                                                                                                                                                | Result        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| Protected-resource metadata → real AS discovery (`…/realms/agent/.well-known/openid-authorization-server` via the appended candidate, because the issuer has a path) | ✅            |
+| `client_credentials` with `client_secret_basic`                                                                                                                      | ✅ real token |
+| Signature verified against the provider's JWKS (`RS256`, `kid`)                                                                                                      | ✅            |
+| `aud` contains `agent-mcp`, `scope` contains `agent:mcp`, `iss` is the realm                                                                                         | ✅            |
+| `refresh()` re-requests and the new token verifies                                                                                                                   | ✅            |
+| A wrong client secret is refused, no token invented                                                                                                                  | ✅            |
+
+```bash
+AGENT_OIDC_ISSUER=http://127.0.0.1:8090/realms/agent \
+AGENT_OIDC_AUDIENCE=agent-mcp \
+AGENT_OIDC_CLIENT_ID=agent-cli AGENT_OIDC_CLIENT_SECRET=agent-cli-secret \
+AGENT_OIDC_SCOPE=agent:mcp \
+  pnpm vitest run src/oauth-live.e2e.test.ts
+```
+
+The test serves its own `/.well-known/oauth-protected-resource/mcp`, because a real MCP server
+publishes that document and Keycloak does not — the identity provider is real, the resource
+metadata is the test's stand-in.
+
+**What is still not live:** the `authorization_code` grant needs a browser session (Keycloak
+redirects to a login form), so it is covered by the conformance harness's scripted servers
+instead. `jwt_bearer` needs an IdP that issues ID-JAGs, which Keycloak does not implement.
+
 ## What running it found in the agent## What running it found in the agent
 
 The adapter's first version hung against a real HTTP server, and the cause was a genuine
