@@ -15,6 +15,7 @@ import { AgentRuntime, type ServerToolsMetadata } from "./runtime.js";
 import { runAgent } from "./agent/loop.js";
 import { runRepl } from "./repl.js";
 import { exampleServerOptions, isHttpServerSpec, parseServer, type ServerSpec } from "./config.js";
+import { acquireToken } from "./mcp/oauth.js";
 import { buildRunConfig } from "./cli-config.js";
 import { loadCatalog, type ModelCatalog, type ModelIntegration } from "./models/catalog.js";
 import { discoverOllamaIntegrations } from "./models/ollama.js";
@@ -261,6 +262,26 @@ async function main(): Promise<void> {
     } catch (error) {
       console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = error instanceof System1TierError ? ExitCode.Usage : ExitCode.Config;
+      return;
+    }
+  }
+
+  // OAuth is resolved before the first connection: a 401 is an instruction, not an
+  // error, so the token is obtained while the server list is still being built.
+  for (const spec of serverSpecs) {
+    if (!isHttpServerSpec(spec) || !spec.oauth) continue;
+    try {
+      const token = await acquireToken(spec.url, spec.oauth, {
+        log: (message) => console.error(message),
+      });
+      spec.headers = { ...spec.headers, Authorization: `${token.tokenType} ${token.accessToken}` };
+      console.error(`[oauth] ${spec.serverName}: authenticated (client ${token.clientId})`);
+    } catch (error) {
+      console.error(
+        `error: OAuth for server "${spec.serverName}" failed: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+      process.exitCode = ExitCode.Config;
       return;
     }
   }

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { ApprovalPolicy } from "@adaptivemcp/approval";
 import type { AiSdkProviderConfig } from "./provider/ai-sdk.js";
 import type { StdioToolsetOptions } from "./mcp/stdio.js";
+import type { AuthorizationMode } from "./mcp/oauth.js";
 
 /** A remote (Streamable HTTP) MCP server spec. Discriminated by `transport`. */
 export interface HttpServerOptions {
@@ -14,6 +15,17 @@ export interface HttpServerOptions {
   url: string;
   /** Static headers sent with every request (e.g. a bearer token). */
   headers?: Record<string, string>;
+  /**
+   * Opt in to OAuth 2.1 discovery + authorization-code login when the server answers 401.
+   * `authorize: "fetch"` completes the redirect programmatically (headless drivers);
+   * the default `"browser"` prints a URL and waits for the loopback callback.
+   */
+  oauth?: {
+    authorize?: AuthorizationMode;
+    redirectUri?: string;
+    clientName?: string;
+    scopes?: string[];
+  };
 }
 
 /** A parsed `--server` spec: local stdio, or remote HTTP. */
@@ -56,7 +68,9 @@ export function parseServer(spec: string): ServerSpec {
 
   const separator = trimmed.indexOf("=");
   if (separator <= 0) {
-    throw new Error(`invalid server spec "${spec}" (expected "name=command args" or a JSON object)`);
+    throw new Error(
+      `invalid server spec "${spec}" (expected "name=command args" or a JSON object)`,
+    );
   }
   const serverName = trimmed.slice(0, separator).trim();
   const tokens = trimmed
@@ -75,7 +89,9 @@ function parseServerJson(spec: string): ServerSpec {
   try {
     parsed = JSON.parse(spec);
   } catch (error) {
-    throw new Error(`invalid server spec (bad JSON): ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `invalid server spec (bad JSON): ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("invalid server spec (expected a JSON object)");
@@ -95,6 +111,33 @@ function parseServerJson(spec: string): ServerSpec {
       transport: "http",
       url: obj.url.trim(),
     };
+    if (obj.oauth !== undefined) {
+      if (typeof obj.oauth !== "object" || obj.oauth === null || Array.isArray(obj.oauth)) {
+        throw new Error("invalid server spec ('oauth' must be an object)");
+      }
+      const raw = obj.oauth as Record<string, unknown>;
+      const oauth: NonNullable<HttpServerOptions["oauth"]> = {};
+      if (raw.authorize !== undefined) {
+        if (raw.authorize !== "browser" && raw.authorize !== "fetch") {
+          throw new Error('invalid server spec (oauth.authorize must be "browser" or "fetch")');
+        }
+        oauth.authorize = raw.authorize;
+      }
+      for (const key of ["redirectUri", "clientName"] as const) {
+        if (raw[key] === undefined) continue;
+        if (typeof raw[key] !== "string") {
+          throw new Error(`invalid server spec (oauth.${key} must be a string)`);
+        }
+        oauth[key] = raw[key] as string;
+      }
+      if (raw.scopes !== undefined) {
+        if (!Array.isArray(raw.scopes) || raw.scopes.some((s) => typeof s !== "string")) {
+          throw new Error("invalid server spec (oauth.scopes must be an array of strings)");
+        }
+        oauth.scopes = raw.scopes as string[];
+      }
+      http.oauth = oauth;
+    }
     if (obj.headers !== undefined) {
       if (typeof obj.headers !== "object" || obj.headers === null || Array.isArray(obj.headers)) {
         throw new Error("invalid server spec ('headers' must be an object of strings)");
@@ -136,7 +179,8 @@ function parseServerJson(spec: string): ServerSpec {
     options.env = env;
   }
   if (obj.cwd !== undefined) {
-    if (typeof obj.cwd !== "string") throw new Error("invalid server spec ('cwd' must be a string)");
+    if (typeof obj.cwd !== "string")
+      throw new Error("invalid server spec ('cwd' must be a string)");
     options.cwd = obj.cwd;
   }
   return options;

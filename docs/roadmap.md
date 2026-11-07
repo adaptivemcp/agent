@@ -9,24 +9,22 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. OAuth discovery in the CLI path
+### 1. More OAuth scenarios, and token refresh
 
-`initialize` and `tools_call` pass; `auth/metadata-default` now runs in CI and is
-**baselined**. The client stops at the harness's `401` because the CLI only sends static
-headers, so all five discovery checks are missing (PRM request, AS metadata, registration,
-authorization request, token request).
+`auth/metadata-default` **passes 13/13** (#109) with discovery, dynamic registration, PKCE
+S256 and a resource-bound token (`src/mcp/oauth.ts`). The harness also grades variants
+worth covering: `auth/metadata-var1..3` (root vs path-based PRM, OpenID configuration,
+tenant-prefixed issuers), scope step-up, token-endpoint auth styles, resource mismatch.
 
-Implement PRM discovery → AS metadata → registration → authorization request → token
-request, then delete the baseline entry — a stale entry fails CI, so the removal cannot be
-forgotten. `OAuthMiddleware` in `@adaptivemcp/thin-client` already handles
-401 → refresh → retry (`src/mcp/http-oauth.integration.test.ts`); what is missing is
-discovery and per-server CLI configuration.
+Two known gaps, kept visible:
 
-**Tracked:** [#108](https://github.com/adaptivemcp/agent/issues/108). **Measured 2026-11-07:** the scenario runs; the failures are recorded in
-`conformance-client-baseline.yml` with reasons, and CI enforces both directions (a
-regression fails; a fix fails as stale until the line is deleted).
+- **Token refresh inside a run.** `expires_in` is recorded but not honoured; a long
+  session would start failing when the token expires.
+- **The interactive browser flow is untested end-to-end.** The conformance run uses
+  `authorize: "fetch"`; the loopback listener path has no automated test (a human is in it).
 
-**Why now:** it is the largest untested protocol surface, and the harness is already wired.
+**Done when:** the metadata variants pass, refresh is covered by a test that forces expiry,
+and the loopback path has a test that drives its callback server directly.
 
 ### 2. Roadmap and security posture stay current
 

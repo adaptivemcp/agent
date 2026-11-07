@@ -93,7 +93,14 @@ if (!url) {
 
 // tsx's real entry, not the `.bin` shim: the shim is a shell script, so `node <shim>` fails.
 const tsx = join(root, "node_modules", "tsx", "dist", "cli.mjs");
-const spec = JSON.stringify({ name: "conformance", url });
+// `--auth` opts the client into OAuth discovery and completes the redirect headlessly
+// (`authorize: "fetch"`), which is what the `auth/*` scenarios measure.
+const wantsAuth = args.includes("--auth");
+const spec = JSON.stringify(
+  wantsAuth
+    ? { name: "conformance", url, oauth: { authorize: "fetch" } }
+    : { name: "conformance", url },
+);
 
 // `--call` makes the adapter exercise the tool path: a stub model asks for the harness's
 // tool once. Without it the adapter only connects and lists tools (the `initialize` shape).
