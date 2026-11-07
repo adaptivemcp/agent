@@ -56,7 +56,19 @@ export interface OAuthOptions {
    * machine-to-machine: no user, no authorization request, no PKCE — a different model, so
    * it has to be chosen deliberately.
    */
-  grant?: "authorization_code" | "client_credentials";
+  grant?: "authorization_code" | "client_credentials" | "jwt_bearer";
+  /**
+   * Enterprise managed OAuth (SEP-990), for `grant: "jwt_bearer"`: exchange the operator's
+   * IdP ID token for an ID-JAG at `tokenEndpoint`, then present that as the assertion.
+   */
+  identityProvider?: {
+    clientId: string;
+    idToken: string;
+    /** The IdP token endpoint (token exchange, RFC 8693). */
+    tokenEndpoint: string;
+    /** Audience for the exchange — the MCP authorization server's issuer. */
+    audience?: string;
+  };
 }
 
 /** A live credential for one server: current header, and a way to replace it. */
@@ -343,6 +355,72 @@ export async function acquireToken(
     as.token_endpoint_auth_methods_supported,
     clientPrivateKey !== undefined,
   );
+
+  // Enterprise managed OAuth (SEP-990): the operator's IdP-issued ID token is exchanged for
+  // an ID-JAG, and the ID-JAG is the JWT-bearer assertion the MCP authorization server
+  // accepts. Two grants, no browser, no PKCE — and no capability the AS did not advertise.
+  if (options.grant === "jwt_bearer") {
+    const idp = options.identityProvider;
+    if (!idp) {
+      throw new Error("OAuth: jwt_bearer needs identityProvider (id token + token endpoint)");
+    }
+    if (!as.token_endpoint_auth_methods_supported?.includes("client_secret_basic") && !clientSecret) {
+      throw new Error(
+        "OAuth: jwt_bearer needs a pre-registered client (client id + secret) for the " +
+          "authorization server",
+      );
+    }
+    const audience = idp.audience ?? as.issuer ?? issuer;
+    const requestToken = async (): Promise<TokenResponse> => {
+      const exchange = new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: idp.idToken,
+        subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
+        requested_token_type: "urn:ietf:params:oauth:token-type:id-jag",
+        audience,
+        resource: resourceUrl,
+        client_id: idp.clientId,
+      });
+      const exchanged = await postForm<{ access_token?: string }>(
+        fetchImpl,
+        idp.tokenEndpoint,
+        exchange,
+        "ID token exchange",
+      );
+      if (!exchanged.access_token) {
+        throw new Error("OAuth: the identity provider returned no ID-JAG");
+      }
+      const body = new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: exchanged.access_token,
+        resource: resourceUrl,
+      });
+      const headers = await applyClientAuth(
+        body,
+        tokenAuthMethod,
+        clientId,
+        clientSecret,
+        clientPrivateKey,
+        audience,
+      );
+      return tokenRequest(fetchImpl, tokenEndpoint, body, headers);
+    };
+    let asserted = await requestToken();
+    return {
+      header: () => `${asserted.tokenType} ${asserted.accessToken}`,
+      refresh: async () => {
+        asserted = await requestToken();
+        return `${asserted.tokenType} ${asserted.accessToken}`;
+      },
+      escalate: async () => {
+        throw new Error("OAuth: jwt_bearer has no interactive step-up");
+      },
+      ...(asserted.expiresAt ? { expiresAt: asserted.expiresAt } : {}),
+      ...(asserted.scope ? { scope: asserted.scope } : {}),
+      issuer: as.issuer ?? issuer,
+      clientId,
+    };
+  }
 
   // Machine-to-machine: no user, so no authorization request and no PKCE — the token is the
   // whole flow. Deliberately a separate branch rather than a switch inside the interactive

@@ -188,7 +188,7 @@ offline-access-not-supported     14/14
 
 client-credentials-basic          8/8       (with --client-credentials)
 client-credentials-jwt            8/8       (with --client-credentials)
-cross-app-access-complete-flow    9/11      baselined — no token exchange
+cross-app-access-complete-flow    9/9       (with --cross-app)
 ```
 
 Three more defects, all about a server that is older or more configured than the default:
@@ -205,13 +205,18 @@ adapter passes them the way a deployment would — `CONFORMANCE_CLIENT_METADATA_
 `CONFORMANCE_CLIENT_ID`/`CONFORMANCE_CLIENT_SECRET` — and no credential is ever written into
 a server spec's `clientId`/argv.
 
-**The three baselined scenarios are extensions, and the reasons are specific.**
-`client-credentials-*` wants `grant_type=client_credentials` — machine-to-machine, with no
-user, no authorization request and no PKCE; that is a different authentication model
-(SEP-1046), and mixing it with the interactive flow would be worse than not having it.
-`cross-app-access-complete-flow` wants a token exchange into a second application, which is
-a delegation model this host has no caller for. The baseline makes a regression fail and a
-fix fail as _stale_ until the line is deleted.
+**Machine-to-machine is an explicit mode.** `oauth.grant: "client_credentials"` skips the
+authorization request and PKCE entirely, and refuses to start without a pre-registered
+identity; client authentication follows the server (`client_secret_basic`, `_post`, or
+`private_key_jwt` with an ES256 assertion).
+
+**Enterprise managed OAuth (SEP-990) completes the set.** `oauth.grant: "jwt_bearer"`
+exchanges the operator's IdP ID token for an **ID-JAG** at the IdP (RFC 8693), then presents
+that as the `jwt-bearer` assertion at the MCP authorization server — no browser, no PKCE, and
+the audience comes from the server's metadata rather than a guess.
+
+`auth/cross-app-access-complete-flow` went from baselined to **9/9**, which retired the
+baseline file entirely: no client scenario is suppressed any more.
 
 ### The two non-auth scenarios
 

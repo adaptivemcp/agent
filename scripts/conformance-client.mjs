@@ -114,12 +114,29 @@ try {
   context = {};
 }
 const machineToMachine = args.includes("--client-credentials");
+const crossApp = args.includes("--cross-app");
 if (machineToMachine && context.client_secret) {
   process.env.CONFORMANCE_CLIENT_SECRET = context.client_secret;
 }
 if (machineToMachine && context.private_key_pem) {
   process.env.CONFORMANCE_PRIVATE_KEY = context.private_key_pem;
 }
+if (crossApp && context.idp_id_token) process.env.CONFORMANCE_ID_TOKEN = context.idp_id_token;
+if (crossApp && context.client_secret) {
+  process.env.CONFORMANCE_CLIENT_SECRET = context.client_secret;
+}
+const crossAppAccess = crossApp
+  ? {
+      // SEP-990: exchange the IdP ID token for an ID-JAG, then present it as the
+      // jwt-bearer assertion. The audience is discovered from the MCP authorization server.
+      grant: "jwt_bearer",
+      clientId: context.client_id ?? process.env.CONFORMANCE_CLIENT_ID,
+      clientSecretEnv: "CONFORMANCE_CLIENT_SECRET",
+      idTokenEnv: "CONFORMANCE_ID_TOKEN",
+      idpTokenEndpoint: context.idp_token_endpoint,
+      idpClientId: context.idp_client_id,
+    }
+  : {};
 const clientCredentials = machineToMachine
   ? {
       grant: "client_credentials",
@@ -137,6 +154,7 @@ const spec = JSON.stringify({
           authorize: "fetch",
           ...preRegistered,
           ...clientCredentials,
+          ...crossAppAccess,
           ...(clientMetadataUrl ? { clientMetadataUrl } : {}),
         },
       }
