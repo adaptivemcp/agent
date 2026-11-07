@@ -234,7 +234,9 @@ listing:
   flat properties), but a peer that sends one anyway is accepted only if the JSON parses. With no
   flag the capability is **not advertised**: a server should not ask a client that cannot
   answer. Only declared defaults are filled; a field without one stays omitted. A
-  `mode: "url"` elicitation is declined, because there is no form to complete. The whole form is
+  `mode: "url"` elicitation is shown as a link in prompt mode (a non-http(s) URL is refused
+  without being displayed, and headless modes decline), because only a person can complete an
+  out-of-band flow. The whole form is
   rendered before the questions, and the answers are shown for review before they are sent —
   one re-entry if the review is rejected, a decline after the second. In the REPL
   the form uses the REPL's own reader, so it does not fight the prompt for the terminal;

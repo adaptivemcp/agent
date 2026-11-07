@@ -77,7 +77,14 @@ export class HttpToolset implements ResourceToolset {
         capabilities: {
           extensions: { [TOOLS_METADATA_EXTENSION]: {} },
           ...(this.options.elicitation
-            ? { elicitation: { form: { applyDefaults: this.options.elicitation === "defaults" } } }
+            ? {
+                elicitation: {
+                  form: { applyDefaults: this.options.elicitation === "defaults" },
+                  // URL-mode is only worth advertising when a person can act on the link;
+                  // a headless host would accept nothing but decline.
+                  ...(this.options.elicitation === "prompt" ? { url: {} } : {}),
+                },
+              }
             : {}),
         },
       },

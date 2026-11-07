@@ -19,10 +19,13 @@ export interface ElicitationRequest {
   message?: string;
   mode?: string;
   requestedSchema?: unknown;
+  /** URL-mode elicitation: the page the person is asked to open. */
+  url?: string;
+  elicitationId?: string;
 }
 
 export type ElicitResult =
-  { action: "accept"; content: Record<string, unknown> } | { action: "decline" };
+  { action: "accept"; content?: Record<string, unknown> } | { action: "decline" };
 
 /** Asks a question and returns the raw answer; injected so this is testable without a TTY. */
 export type ElicitationAsk = (question: string) => Promise<string>;
@@ -229,6 +232,39 @@ async function collect(
   return content;
 }
 
+/** Only an absolute http(s) URL is worth showing a person as "open this". */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * URL-mode elicitation: the server asks the person to complete a flow out of band.
+ *
+ * The client cannot complete it and must not pretend to. In prompt mode it shows the URL,
+ * asks whether the flow was completed, and accepts only on a yes; anything else declines.
+ * A non-http(s) URL is refused without being shown — handing a `file:` or `javascript:`
+ * link to a terminal as "open this" is how a prompt becomes an exploit.
+ */
+export async function readUrlRequest(
+  request: ElicitationRequest,
+  ask: ElicitationAsk,
+  notify: (message: string) => void = () => {},
+): Promise<ElicitResult> {
+  const url = request.url ?? "";
+  if (!isHttpUrl(url)) {
+    notify("[elicitation] refusing a non-http(s) URL request");
+    return { action: "decline" };
+  }
+  notify(`[elicitation] ${request.message ?? "The server needs you to open a URL."}\n  ${url}`);
+  const answer = (await ask("  completed the flow there? [y/N]: ")).trim().toLowerCase();
+  return answer === "y" || answer === "yes" ? { action: "accept" } : { action: "decline" };
+}
+
 /** The review block: every field with what will be sent (or that it is omitted). */
 export function renderReview(
   request: ElicitationRequest,
@@ -299,7 +335,11 @@ export function createElicitationHandler(
   notify?: (message: string) => void,
 ): (request: ElicitationRequest) => Promise<ElicitResult> {
   return async (request) => {
-    if (request.mode === "url") return { action: "decline" };
+    if (request.mode === "url") {
+      // Only a person can do this; a headless host declines rather than claiming otherwise.
+      if (mode !== "prompt" || !ask) return { action: "decline" };
+      return readUrlRequest(request, ask, notify);
+    }
     if (mode === "decline") return { action: "decline" };
     if (mode === "defaults")
       return { action: "accept", content: schemaDefaults(request.requestedSchema) };

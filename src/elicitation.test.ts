@@ -4,6 +4,8 @@ import {
   createElicitationHandler,
   readForm,
   renderForm,
+  isHttpUrl,
+  readUrlRequest,
   renderReview,
   schemaDefaults,
   validateValue,
@@ -106,6 +108,76 @@ describe("elicitation handler", () => {
     const result = await readForm(REQUEST, async () => answers.shift() ?? "");
 
     expect(result).toEqual({ action: "decline" });
+  });
+});
+
+describe("url-mode elicitation", () => {
+  const URL_REQUEST = {
+    mode: "url",
+    message: "Authorize this device",
+    url: "https://auth.example.com/device?code=ABCD",
+    elicitationId: "el-1",
+  };
+
+  it("shows the link and accepts only when the person confirms", async () => {
+    const notes: string[] = [];
+    const asked: string[] = [];
+    const result = await readUrlRequest(
+      URL_REQUEST,
+      async (question) => {
+        asked.push(question);
+        return "y";
+      },
+      (line) => notes.push(line),
+    );
+
+    expect(result).toEqual({ action: "accept" });
+    expect(notes.join("\n")).toContain("https://auth.example.com/device?code=ABCD");
+    expect(notes.join("\n")).toContain("Authorize this device");
+    expect(asked.at(-1)).toContain("completed the flow");
+  });
+
+  it("declines when the person did not complete it (the default answer)", async () => {
+    const result = await readUrlRequest(URL_REQUEST, async () => "");
+    expect(result).toEqual({ action: "decline" });
+  });
+
+  it("refuses a non-http(s) URL without showing it", async () => {
+    const notes: string[] = [];
+    let asked = 0;
+    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "not a url"]) {
+      const result = await readUrlRequest(
+        { mode: "url", url },
+        async () => {
+          asked += 1;
+          return "y";
+        },
+        (line) => notes.push(line),
+      );
+      expect(result).toEqual({ action: "decline" });
+    }
+    // Nothing was offered and nothing was asked.
+    expect(asked).toBe(0);
+    expect(notes.join("\n")).not.toContain("/etc/passwd");
+    expect(notes.join("\n")).toContain("non-http(s)");
+  });
+
+  it("only prompt mode can answer a url request; headless modes decline", async () => {
+    expect(await createElicitationHandler("defaults")(URL_REQUEST)).toEqual({ action: "decline" });
+    expect(await createElicitationHandler("decline")(URL_REQUEST)).toEqual({ action: "decline" });
+    // prompt mode without a reader (no TTY) also declines rather than claiming consent.
+    expect(await createElicitationHandler("prompt")(URL_REQUEST)).toEqual({ action: "decline" });
+    expect(await createElicitationHandler("prompt", async () => "y")(URL_REQUEST)).toEqual({
+      action: "accept",
+    });
+  });
+
+  it("recognises only absolute http(s) URLs", () => {
+    expect(isHttpUrl("https://example.com/x")).toBe(true);
+    expect(isHttpUrl("http://127.0.0.1:8080/cb")).toBe(true);
+    expect(isHttpUrl("file:///etc/passwd")).toBe(false);
+    expect(isHttpUrl("javascript:alert(1)")).toBe(false);
+    expect(isHttpUrl("/relative")).toBe(false);
   });
 });
 

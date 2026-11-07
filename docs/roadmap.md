@@ -22,21 +22,23 @@ otherwise it is a protocol feature with no product behind it.
 **Done when:** a host can delegate a scoped token to a second server on purpose, the
 scenario passes, and the baseline file is empty (and therefore deleted).
 
-### 2. Elicitation ergonomics
+### 2. Elicitation: the last edges
 
-`--elicitation prompt` now renders the **whole form** before asking, then shows a review of
-exactly what will be sent and asks to submit — with one re-entry if the review is rejected and
-a decline (not a submission) after a second refusal. Array answers are parsed and validated;
-a non-answer at the review is asked again, and three non-answers decline rather than loop.
+`--elicitation prompt` renders the whole form, reviews it, and now handles **`mode: "url"`**:
+the link is shown, the person confirms whether they completed the flow there, and only a yes
+accepts. A non-http(s) URL (`file:`, `javascript:`) is refused without ever being displayed,
+and headless modes still decline rather than claim a person did something. The capability is
+advertised as `elicitation.url` only in prompt mode, because a headless host would answer
+every such request with a decline.
 
-What is left is narrower again:
+What remains is genuinely small:
 
-- `mode: "url"` requests are declined instead of surfaced as a link the person can open;
-- a single-field form skips the review by design (nothing to review), and there is no
-  back-edit of one field from the review — only a full re-entry.
+- the review cannot re-open a single field — only a full re-entry;
+- an accepted url request is a person's assertion; the client does not poll the server for
+  `notifications/elicitation/complete` and reconcile it.
 
-**Done when:** a `url` elicitation can be opened from the CLI (or explicitly refused with a
-reason the server understands), and the review can re-open a single field.
+**Done when:** the review can edit one field, and an accepted url flow is confirmed by the
+server's completion notification (or the decline is explicit).
 
 ### 3. Roadmap and security posture stay current
 
