@@ -147,6 +147,16 @@ describe("documentation guards", () => {
     for (const variant of ["var1", "var2", "var3"]) {
       expect(ci, `CI must run auth/metadata-${variant}`).toContain(`auth/metadata-${variant}`);
     }
+    // Every auth scenario the docs claim must actually be in the workflow.
+    for (const scenario of [
+      "auth/resource-mismatch",
+      "auth/token-endpoint-auth-basic",
+      "auth/token-endpoint-auth-post",
+      "auth/token-endpoint-auth-none",
+      "auth/scope-step-up",
+    ]) {
+      expect(ci, `CI must run ${scenario}`).toContain(scenario);
+    }
     // A baseline that is no longer needed is dead config; the file is gone.
     expect(existsSync(join(REPO, "conformance-client-baseline.yml"))).toBe(false);
   });

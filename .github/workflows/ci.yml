@@ -162,6 +162,30 @@ jobs:
               --output-dir "conformance-results/${scenario//\//-}"
           done
 
+      # The step-up only fires for an operation that needs more scope than the token has,
+      # so this scenario needs a tool call, not just a listing.
+      - name: Conformance (auth scope step-up)
+        working-directory: agent
+        env:
+          CONFORMANCE_TOOL: conformance_test-tool
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --auth --call" \
+            --scenario auth/scope-step-up \
+            --timeout 60000 \
+            --output-dir conformance-results/auth-scope-step-up
+
+      - name: Conformance (auth resource + token-endpoint styles)
+        working-directory: agent
+        run: |
+          for scenario in auth/resource-mismatch auth/token-endpoint-auth-basic auth/token-endpoint-auth-post auth/token-endpoint-auth-none; do
+            npx -y @modelcontextprotocol/conformance@0.1.16 client \
+              --command "node scripts/conformance-client.mjs --auth" \
+              --scenario "$scenario" \
+              --timeout 60000 \
+              --output-dir "conformance-results/${scenario//\//-}"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

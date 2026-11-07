@@ -9,18 +9,25 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. More OAuth scenarios
+### 1. The remaining OAuth scenarios
 
-All four metadata shapes pass (`auth/metadata-default` and `var1..3`, 13/13 each), refresh
-is wired on `401`, and the loopback callback path is tested by driving its listener.
+Four metadata shapes, resource mismatch, the three token-endpoint auth styles and scope
+step-up now pass (13/13, 2/2, 18/18 each, 22/22 for step-up). Each was a real defect before
+it was a green check: metadata discovery order, resource binding, client authentication, and
+step-up re-authorization.
 
-What the harness still grades and this client does not yet exercise: **scope step-up**
-(a `403` that names required scopes), **resource mismatch** (a token issued for another
-server must be refused), and the **token-endpoint auth styles** (`basic`, `post`, `none`).
-Those are correctness properties with security weight, not extra credit.
+Still unmeasured, and worth it because each is a distinct trust decision:
 
-**Done when:** `auth/scope-step-up` and `auth/resource-mismatch` pass or are baselined with
-reasons, and the token-endpoint-auth scenarios report the style actually used.
+- **`auth/basic-cimd`** — Client ID Metadata Documents: using a URL as the client id instead
+  of dynamic registration.
+- **`auth/pre-registration`**, **`auth/client-credentials-jwt`**,
+  **`auth/client-credentials-basic`** — a pre-registered client, and machine-to-machine
+  grants where no human is in the loop.
+- **`auth/2025-03-26-oauth-*`** — the pre-RFC metadata fallbacks, which older deployments
+  still publish.
+
+**Done when:** each runs and either passes or is baselined with a reason, as the last batch
+was.
 
 ### 2. Roadmap and security posture stay current
 

@@ -33,6 +33,7 @@ export interface HttpServerOptions {
   auth?: {
     header: () => string;
     refresh?: () => Promise<string>;
+    escalate?: (scopes: string[]) => Promise<string>;
   };
 }
 

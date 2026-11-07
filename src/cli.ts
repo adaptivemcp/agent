@@ -280,6 +280,7 @@ async function main(): Promise<void> {
       spec.auth = {
         header: () => session.header(),
         refresh: () => session.refresh(),
+        escalate: (scopes) => session.escalate(scopes),
       };
       console.error(`[oauth] ${spec.serverName}: authenticated (client ${session.clientId})`);
     } catch (error) {

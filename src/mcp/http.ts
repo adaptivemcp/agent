@@ -20,6 +20,8 @@ export interface HttpToolsetOptions {
   auth?: {
     header: () => string;
     refresh?: () => Promise<string>;
+    /** Re-authorize with more scopes when the server demands a step-up. */
+    escalate?: (scopes: string[]) => Promise<string>;
   };
 }
 
@@ -76,12 +78,30 @@ export class HttpToolset implements ResourceToolset {
       return fetch(target, withAuthorization(init, this.credentials, authorization));
     };
     const response = await send();
-    if (response.status !== 401 || !this.options.auth?.refresh) return response;
+    const auth = this.options.auth;
+    if (!auth) return response;
+
+    // A 403 that names required scopes is a step-up, not a refusal: re-authorize with the
+    // scopes it asks for and retry once. This is the only way a token minted with a
+    // narrower grant can reach a protected operation mid-session.
+    if (response.status === 403 && auth.escalate) {
+      const scopes = insufficientScopes(response.headers.get("www-authenticate") ?? "");
+      if (scopes.length > 0) {
+        await response.body?.cancel().catch(() => {});
+        try {
+          return await send(await auth.escalate(scopes));
+        } catch {
+          return response;
+        }
+      }
+    }
+
+    if (response.status !== 401 || !auth.refresh) return response;
     // Drain the body so the connection can be reused for the retry.
     await response.body?.cancel().catch(() => {});
     let authorization: string;
     try {
-      authorization = await this.options.auth.refresh();
+      authorization = await auth.refresh();
     } catch {
       return response;
     }
@@ -149,6 +169,13 @@ export class HttpToolset implements ResourceToolset {
     this.client = undefined;
     this.credentials = undefined;
   }
+}
+
+/** `Bearer error="insufficient_scope", scope="a b"` → `["a", "b"]`. */
+function insufficientScopes(header: string): string[] {
+  if (!/error="?insufficient_scope"?/i.test(header)) return [];
+  const scope = /scope="([^"]*)"/i.exec(header)?.[1] ?? "";
+  return scope.split(/\s+/).filter(Boolean);
 }
 
 /**

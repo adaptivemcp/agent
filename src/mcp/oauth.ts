@@ -45,6 +45,11 @@ export interface OAuthSession {
   header: () => string;
   /** Ask the token endpoint for a new access token; returns the new header value. */
   refresh: () => Promise<string>;
+  /**
+   * Re-run the authorization grant with more scopes, for a server that answers `403` with
+   * `error="insufficient_scope"`. Returns the new header value.
+   */
+  escalate: (scopes: string[]) => Promise<string>;
   /** Unix milliseconds, when the server returned `expires_in`. */
   expiresAt?: number;
   scope?: string;
@@ -80,9 +85,74 @@ interface AuthorizationServerMetadata {
 interface RegistrationResponse {
   client_id?: string;
   client_secret?: string;
+  token_endpoint_auth_method?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+/** A loopback redirect for the headless (`fetch`) flow; any registered URI will do. */
+const DEFAULT_REDIRECT_URI = "http://127.0.0.1:8765/oauth/callback";
+
+/** How the token endpoint expects the client to authenticate. */
+type TokenAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+
+/**
+ * Pick the registration response's choice first, then the authorization server's advertised
+ * list, then a sensible default. `client_secret_basic` wins over `post` when a secret exists
+ * and the server offers both, because the secret stays out of the request body.
+ */
+function chooseTokenAuthMethod(
+  registered: string | undefined,
+  clientSecret: string | undefined,
+  supported: string[] | undefined,
+): TokenAuthMethod {
+  if (registered === "client_secret_basic" || registered === "client_secret_post" || registered === "none") {
+    return registered;
+  }
+  if (!clientSecret) return "none";
+  if (supported?.includes("client_secret_basic")) return "client_secret_basic";
+  return "client_secret_post";
+}
+
+/** Apply the chosen client authentication to a token request. */
+function applyClientAuth(
+  body: URLSearchParams,
+  method: TokenAuthMethod,
+  clientId: string,
+  clientSecret: string | undefined,
+): Record<string, string> {
+  if (method === "client_secret_basic" && clientSecret) {
+    const encoded = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
+    return { authorization: `Basic ${encoded}` };
+  }
+  if (method === "client_secret_post" && clientSecret) body.set("client_secret", clientSecret);
+  return {};
+}
+
+/**
+ * Whether PRM `resource` describes the endpoint we are about to call.
+ *
+ * Strict equality is too strict in a way that matters: MCP servers publish either the
+ * endpoint itself (`https://host/mcp`) or the origin (`https://host`) as the protected
+ * resource, and both are the same server. The rule is therefore: same origin, and the
+ * resource's path is either the endpoint's path or a prefix of it. A different origin — or
+ * a same-origin path that is not a prefix — is a different resource and is refused.
+ */
+export function sameResource(resource: string, endpoint: string): boolean {
+  const parts = (value: string): { origin: string; path: string } => {
+    const url = new URL(value);
+    return { origin: url.origin, path: url.pathname.replace(/\/+$/, "") };
+  };
+  try {
+    const left = parts(resource);
+    const right = parts(endpoint);
+    if (left.origin !== right.origin) return false;
+    if (left.path === right.path) return true;
+    // The base URL form: the resource names a parent path of the endpoint.
+    return left.path === "" || right.path.startsWith(`${left.path}/`);
+  } catch {
+    return false;
+  }
+}
 
 /** A loopback callback URL, and the code it is waiting for. */
 interface Callback {
@@ -108,127 +178,152 @@ export async function acquireToken(
   const mode = options.authorize ?? "browser";
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const callback = mode === "browser" ? await startCallback(timeoutMs) : undefined;
-  try {
-    const redirectUri =
-      options.redirectUri ?? callback?.redirectUri ?? "http://127.0.0.1:8765/oauth/callback";
-
-    // 1. Protected-resource metadata. A 401 that names it is authoritative; otherwise
-    // try the RFC 9728 path-based location and then the root. The order matters: a server
-    // that publishes both (and traps the root) is answering the challenge, so the
-    // fallback only serves servers that advertise the metadata another way.
-    const challenged = await challengedMetadataUrl(resourceUrl, fetchImpl);
-    const prm = challenged
-      ? await getJson<ProtectedResourceMetadata>(fetchImpl, challenged, "PRM metadata")
-      : await firstJson<ProtectedResourceMetadata>(
-          fetchImpl,
-          [protectedResourceUrl(resourceUrl), protectedResourceRootUrl(resourceUrl)],
-          "PRM metadata",
-        );
-    const issuer = prm.authorization_servers?.[0];
-    if (!issuer) {
-      throw new Error("OAuth: protected-resource metadata lists no authorization_servers");
-    }
-
-    // 2. Authorization-server metadata. RFC 8414 puts the well-known segment *before* the
-    // issuer's path; OpenID Discovery appends it; both spellings exist in the wild, as do
-    // servers publishing only the OIDC document. Try the standard order.
-    const as = await firstJson<AuthorizationServerMetadata>(
-      fetchImpl,
-      authorizationServerMetadataUrls(issuer),
-      "authorization-server metadata",
-    );
-    if (!as.authorization_endpoint || !as.token_endpoint) {
-      throw new Error(`OAuth: ${issuer} publishes no usable authorization_endpoint/token_endpoint`);
-    }
-    log(`[oauth] ${new URL(resourceUrl).host}: authorization server ${as.issuer ?? issuer}`);
-
-    // 3. Dynamic client registration when offered; otherwise the server must accept a
-    // public client without one.
-    let clientId = options.clientName ?? "adaptivemcp-agent";
-    let clientSecret: string | undefined;
-    if (as.registration_endpoint) {
-      const registration = await postJson<RegistrationResponse>(
+  // 1. Protected-resource metadata. A 401 that names it is authoritative; otherwise
+  // try the RFC 9728 path-based location and then the root. The order matters: a server
+  // that publishes both (and traps the root) is answering the challenge, so the
+  // fallback only serves servers that advertise the metadata another way.
+  const challenged = await challengedMetadataUrl(resourceUrl, fetchImpl);
+  const prm = challenged.metadataUrl
+    ? await getJson<ProtectedResourceMetadata>(fetchImpl, challenged.metadataUrl, "PRM metadata")
+    : await firstJson<ProtectedResourceMetadata>(
         fetchImpl,
-        as.registration_endpoint,
-        {
-          client_name: options.clientName ?? "Adaptive MCP agent",
-          redirect_uris: [redirectUri],
-          grant_types: ["authorization_code", "refresh_token"],
-          response_types: ["code"],
-          token_endpoint_auth_method: "none",
-        },
-        "client registration",
+        [protectedResourceUrl(resourceUrl), protectedResourceRootUrl(resourceUrl)],
+        "PRM metadata",
       );
-      if (!registration.client_id) {
-        throw new Error("OAuth: registration response has no client_id");
-      }
-      clientId = registration.client_id;
-      clientSecret = registration.client_secret;
-    }
-
-    // 4. Authorization request with PKCE S256.
-    const verifier = base64url(randomBytes(32));
-    const challenge = base64url(createHash("sha256").update(verifier).digest());
-    const state = base64url(randomBytes(16));
-    const authorizeUrl = new URL(as.authorization_endpoint);
-    authorizeUrl.searchParams.set("response_type", "code");
-    authorizeUrl.searchParams.set("client_id", clientId);
-    authorizeUrl.searchParams.set("redirect_uri", redirectUri);
-    authorizeUrl.searchParams.set("code_challenge", challenge);
-    authorizeUrl.searchParams.set("code_challenge_method", "S256");
-    authorizeUrl.searchParams.set("state", state);
-    authorizeUrl.searchParams.set("resource", resourceUrl);
-    const scopes = options.scopes ?? [];
-    if (scopes.length > 0) authorizeUrl.searchParams.set("scope", scopes.join(" "));
-
-    const { code, state: returnedState } =
-      mode === "browser"
-        ? await browserAuthorization(authorizeUrl, callback!, log)
-        : await fetchAuthorization(fetchImpl, authorizeUrl, log);
-    if (returnedState !== state) {
-      throw new Error("OAuth: authorization response state does not match the request");
-    }
-
-    // 5. Token request. `resource` is repeated so the token is bound to this server.
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      client_id: clientId,
-      code_verifier: verifier,
-      resource: resourceUrl,
-    });
-    if (clientSecret) body.set("client_secret", clientSecret);
-    const issued = await tokenRequest(fetchImpl, as.token_endpoint, body);
-
-    let current = issued;
-    return {
-      header: () => `${current.tokenType} ${current.accessToken}`,
-      refresh: async () => {
-        if (!current.refreshToken) {
-          throw new Error("OAuth: the token response carried no refresh_token");
-        }
-        const refreshBody = new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: current.refreshToken,
-          client_id: clientId,
-          resource: resourceUrl,
-        });
-        if (clientSecret) refreshBody.set("client_secret", clientSecret);
-        const refreshed = await tokenRequest(fetchImpl, as.token_endpoint as string, refreshBody);
-        // A refresh response may omit `refresh_token`; keep the one that still works.
-        current = { ...refreshed, refreshToken: refreshed.refreshToken ?? current.refreshToken };
-        return `${current.tokenType} ${current.accessToken}`;
-      },
-      ...(issued.expiresAt ? { expiresAt: issued.expiresAt } : {}),
-      ...(issued.scope ? { scope: issued.scope } : {}),
-      issuer: as.issuer ?? issuer,
-      clientId,
-    };
-  } finally {
-    callback?.close();
+  // A PRM that names a *different* resource is not this server's metadata. Issuing a token
+  // for it would send the user through an authorization server that has nothing to do with
+  // the endpoint being called — the confused-deputy shape RFC 8707 exists to prevent.
+  if (prm.resource && !sameResource(prm.resource, resourceUrl)) {
+    throw new Error(
+      `OAuth: protected-resource metadata is for "${prm.resource}", not "${resourceUrl}"; ` +
+        "refusing to authorize against a different resource",
+    );
   }
+  const issuer = prm.authorization_servers?.[0];
+  if (!issuer) {
+    throw new Error("OAuth: protected-resource metadata lists no authorization_servers");
+  }
+
+  // 2. Authorization-server metadata. RFC 8414 puts the well-known segment *before* the
+  // issuer's path; OpenID Discovery appends it; both spellings exist in the wild, as do
+  // servers publishing only the OIDC document. Try the standard order.
+  const as = await firstJson<AuthorizationServerMetadata>(
+    fetchImpl,
+    authorizationServerMetadataUrls(issuer),
+    "authorization-server metadata",
+  );
+  const tokenEndpoint = as.token_endpoint;
+  if (!as.authorization_endpoint || !tokenEndpoint) {
+    throw new Error(`OAuth: ${issuer} publishes no usable authorization_endpoint/token_endpoint`);
+  }
+  log(`[oauth] ${new URL(resourceUrl).host}: authorization server ${as.issuer ?? issuer}`);
+
+  // 3. Dynamic client registration when offered; otherwise the server must accept a
+  // public client without one. The *response* decides how the token endpoint wants the
+  // client authenticated — a server can register a public client and still require basic.
+  let clientId = options.clientName ?? "adaptivemcp-agent";
+  let clientSecret: string | undefined;
+  let registeredAuthMethod: string | undefined;
+  if (as.registration_endpoint) {
+    const registration = await postJson<RegistrationResponse>(
+      fetchImpl,
+      as.registration_endpoint,
+      {
+        client_name: options.clientName ?? "Adaptive MCP agent",
+        redirect_uris: [options.redirectUri ?? DEFAULT_REDIRECT_URI],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      },
+      "client registration",
+    );
+    if (!registration.client_id) {
+      throw new Error("OAuth: registration response has no client_id");
+    }
+    clientId = registration.client_id;
+    clientSecret = registration.client_secret;
+    registeredAuthMethod = registration.token_endpoint_auth_method;
+  }
+  const tokenAuthMethod = chooseTokenAuthMethod(
+    registeredAuthMethod,
+    clientSecret,
+    as.token_endpoint_auth_methods_supported,
+  );
+
+  /** One authorization-code grant. Called again, with more scopes, on a step-up. */
+  const authorizeOnce = async (scopes: string[]): Promise<TokenResponse> => {
+    const callback = mode === "browser" ? await startCallback(timeoutMs) : undefined;
+    try {
+      const redirectUri = options.redirectUri ?? callback?.redirectUri ?? DEFAULT_REDIRECT_URI;
+      const verifier = base64url(randomBytes(32));
+      const challenge = base64url(createHash("sha256").update(verifier).digest());
+      const state = base64url(randomBytes(16));
+      const authorizeUrl = new URL(as.authorization_endpoint as string);
+      authorizeUrl.searchParams.set("response_type", "code");
+      authorizeUrl.searchParams.set("client_id", clientId);
+      authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+      authorizeUrl.searchParams.set("code_challenge", challenge);
+      authorizeUrl.searchParams.set("code_challenge_method", "S256");
+      authorizeUrl.searchParams.set("state", state);
+      authorizeUrl.searchParams.set("resource", resourceUrl);
+      if (scopes.length > 0) authorizeUrl.searchParams.set("scope", scopes.join(" "));
+
+      const { code, state: returnedState } =
+        mode === "browser"
+          ? await browserAuthorization(authorizeUrl, callback!, log)
+          : await fetchAuthorization(fetchImpl, authorizeUrl, log);
+      if (returnedState !== state) {
+        throw new Error("OAuth: authorization response state does not match the request");
+      }
+
+      // `resource` is repeated so the token is bound to this server.
+      const body = new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+        client_id: clientId,
+        code_verifier: verifier,
+        resource: resourceUrl,
+      });
+      const headers = applyClientAuth(body, tokenAuthMethod, clientId, clientSecret);
+      return tokenRequest(fetchImpl, tokenEndpoint, body, headers);
+    } finally {
+      callback?.close();
+    }
+  };
+
+  const initialScopes =
+    options.scopes ?? (challenged.scope ? challenged.scope.split(/\s+/).filter(Boolean) : []);
+  let current = await authorizeOnce(initialScopes);
+
+  return {
+    header: () => `${current.tokenType} ${current.accessToken}`,
+    refresh: async () => {
+      if (!current.refreshToken) {
+        throw new Error("OAuth: the token response carried no refresh_token");
+      }
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: current.refreshToken,
+        client_id: clientId,
+        resource: resourceUrl,
+      });
+      const headers = applyClientAuth(body, tokenAuthMethod, clientId, clientSecret);
+      const refreshed = await tokenRequest(fetchImpl, tokenEndpoint, body, headers);
+      // A refresh response may omit `refresh_token`; keep the one that still works.
+      current = { ...refreshed, refreshToken: refreshed.refreshToken ?? current.refreshToken };
+      return `${current.tokenType} ${current.accessToken}`;
+    },
+    escalate: async (scopes: string[]) => {
+      log(`[oauth] ${new URL(resourceUrl).host}: escalating scopes to ${scopes.join(" ")}`);
+      current = await authorizeOnce(scopes);
+      return `${current.tokenType} ${current.accessToken}`;
+    },
+    ...(current.expiresAt ? { expiresAt: current.expiresAt } : {}),
+    ...(current.scope ? { scope: current.scope } : {}),
+    issuer: as.issuer ?? issuer,
+    clientId,
+  };
 }
 
 /** `https://host/mcp` → `https://host/.well-known/oauth-protected-resource/mcp`. */
@@ -289,11 +384,17 @@ async function firstJson<T>(fetchImpl: typeof fetch, urls: string[], what: strin
     : new Error(`OAuth: no ${what} found at ${urls.join(", ")}`);
 }
 
-/** Read `resource_metadata` from a 401 challenge, if the server offers one. */
+/** What a 401 challenge told us: where the metadata is, and which scopes it wants. */
+interface Challenge {
+  metadataUrl?: string;
+  scope?: string;
+}
+
+/** Read `resource_metadata` and `scope` from a 401 challenge. */
 async function challengedMetadataUrl(
   resourceUrl: string,
   fetchImpl: typeof fetch,
-): Promise<string | undefined> {
+): Promise<Challenge> {
   try {
     const response = await fetchImpl(resourceUrl, {
       method: "POST",
@@ -303,16 +404,24 @@ async function challengedMetadataUrl(
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" }),
     });
-    if (response.status !== 401) return undefined;
-    const header = response.headers.get("www-authenticate") ?? "";
-    const match =
-      /resource_metadata="([^"]+)"/i.exec(header) ?? /resource_metadata=([^,\s]+)/i.exec(header);
-    return match?.[1];
+    if (response.status !== 401) return {};
+    return parseChallenge(response.headers.get("www-authenticate") ?? "");
   } catch {
     // A probe that cannot connect is not fatal here: the MCP transport will report the
     // real problem. Fall through to the derived location.
-    return undefined;
+    return {};
   }
+}
+
+/** Parse `resource_metadata` and `scope` out of a `WWW-Authenticate: Bearer …` value. */
+export function parseChallenge(header: string): Challenge {
+  const metadata =
+    /resource_metadata="([^"]+)"/i.exec(header) ?? /resource_metadata=([^,\s]+)/i.exec(header);
+  const scope = /(?:^|[,\s])scope="([^"]*)"/i.exec(header);
+  return {
+    ...(metadata?.[1] ? { metadataUrl: metadata[1] } : {}),
+    ...(scope?.[1] ? { scope: scope[1] } : {}),
+  };
 }
 
 async function browserAuthorization(
@@ -420,6 +529,7 @@ async function tokenRequest(
   fetchImpl: typeof fetch,
   tokenEndpoint: string,
   body: URLSearchParams,
+  headers: Record<string, string> = {},
 ): Promise<TokenResponse> {
   const token = await postForm<{
     access_token?: string;
@@ -427,7 +537,7 @@ async function tokenRequest(
     refresh_token?: string;
     expires_in?: number;
     scope?: string;
-  }>(fetchImpl, tokenEndpoint, body, "token request");
+  }>(fetchImpl, tokenEndpoint, body, "token request", headers);
   if (!token.access_token) {
     throw new Error("OAuth: token response has no access_token");
   }
@@ -470,12 +580,14 @@ async function postForm<T>(
   url: string,
   body: URLSearchParams,
   what: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<T> {
   const response = await fetchImpl(url, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       accept: "application/json",
+      ...extraHeaders,
     },
     body: body.toString(),
   });
