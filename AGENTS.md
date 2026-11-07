@@ -266,8 +266,9 @@ tell it is reading a fragment. The summary says what happened
 (`loaded`) plus the skills, MCP resources and tools the host knows about
 (`discovered`), with their source/level and estimated cost. Resource listing is a
 round trip per server, so it only happens when the catalog is asked for — a one-shot
-run never pays it. Per-item load tracking (a skill read at step 4) needs context
-telemetry and is deliberately not claimed yet; the listing would go stale.
+run never pays it. Per-item load tracking is recorded (next paragraph) rather than
+inferred: the column shows how often the _host_ loaded an item, not when a model happened
+to read it mid-run.
 
 **Context-load telemetry** now exists: after assembly the host records every kept section
 through `runtime.adaptive.memory.recordContext?.()` (best-effort — the store's methods are
@@ -373,8 +374,10 @@ approve })`, `saveResumeState(messages)` and `resumeMessages(suspension)` —
    provider-hosted agent runner.
 4. **Offline by default in tests.** Tests use `ScriptedModel` + `InMemoryToolset`;
    never require network or API keys.
-5. **Local by default at runtime.** stdio MCP only for now; if HTTP transport is
-   ever added, bind `127.0.0.1` and require auth.
+5. **Local by default at runtime.** stdio is the default transport and spawns a local
+   child. HTTP is client-side only (`HttpToolset`, a `--server` JSON object with a
+   `url`), never a listener; if this repo ever serves MCP, bind `127.0.0.1` and require
+   auth.
 
 ## Conventions
 
@@ -399,8 +402,9 @@ approve })`, `saveResumeState(messages)` and `resumeMessages(suspension)` —
 - See `README.md` and `docs/architecture.md` for the full picture and roadmap.
 - `docs/sdk-tiers.md` grades this host against the
   [MCP SDK tiering requirements](https://modelcontextprotocol.io/community/sdk-tiers) —
-  we are not an SDK, so no tier is claimed, but the gaps (no `SECURITY.md`, no
-  roadmap, no `P0` labels, no conformance run) are stated there.
+  we are not an SDK, so no tier is claimed. `P0`–`P3` labels exist and the client
+  conformance job runs (advisory), so the remaining gaps stated there are `SECURITY.md`
+  and a roadmap document.
 - `docs/archetypes/` catalogues the components behind the five agent archetypes
   (tool, skills, sequential, human-in-the-loop, orchestrator) and where this host
   stands against them — the reference for prioritising new capability. Its gap
