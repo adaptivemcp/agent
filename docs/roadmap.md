@@ -25,14 +25,19 @@ exchange between applications.
 **Done when:** a host can opt into a machine identity explicitly, the two client-credentials
 scenarios pass, and their baseline lines are deleted.
 
-### 2. Interactive elicitation
+### 2. Richer elicitation forms
 
-`--elicitation defaults|decline` covers headless hosts. The REPL could prompt a human with
-the schema's form instead of applying defaults, which is the point of elicitation — and the
-one place the opt-in currently has to guess on the operator's behalf.
+`--elicitation prompt` now reads a form line by line in the terminal (and through the REPL's
+own reader), with schema-typed answers, defaults offered, one retry on a rejected answer,
+and a decline rather than a guessed value. `defaults` and `decline` remain for headless runs.
 
-**Done when:** the REPL renders a form (or a line-oriented prompt) from a requested schema
-and sends the answers back, and the conformance scenario still passes in defaults mode.
+What it does not do yet: **nested objects and arrays** (they read as the raw string), a
+multi-field form rendered at once, and `mode: "url"` (declined, since a URL handoff has no
+console story). SEP-1034's enum titles are shown; per-field validation messages could be
+friendlier.
+
+**Done when:** object/array fields round-trip through a small JSON editor prompt, and a
+`mode: "url"` request can be surfaced as a link the person can open.
 
 ### 3. Roadmap and security posture stay current
 

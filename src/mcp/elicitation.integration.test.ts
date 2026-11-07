@@ -111,6 +111,36 @@ describe("elicitation", () => {
     expect(received?.content).not.toHaveProperty("noDefault");
   }, 30_000);
 
+  it("prompts and sends the answers the person typed", async () => {
+    let received: { action?: string; content?: Record<string, unknown> } | undefined;
+    const server = await start((result) => {
+      received = result as typeof received;
+    });
+    running = server.server;
+    const answers = ["Ada", "41", "no", "a note"];
+    const toolset = new HttpToolset("remote", {
+      serverName: "remote",
+      url: server.url,
+      elicitation: "prompt",
+      elicitationAsk: () => async () => answers.shift() ?? "",
+    });
+
+    try {
+      const result = await toolset.callTool("ask", {});
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+    } finally {
+      await toolset.close();
+    }
+
+    expect(received?.action).toBe("accept");
+    expect(received?.content).toEqual({
+      name: "Ada",
+      age: 41,
+      newsletter: false,
+      noDefault: "a note",
+    });
+  }, 30_000);
+
   it("declines explicitly instead of accepting", async () => {
     let received: { action?: string } | undefined;
     const server = await start((result) => {

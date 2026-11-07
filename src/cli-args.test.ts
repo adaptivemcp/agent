@@ -225,6 +225,13 @@ describe("parseArgs coverage of the full flag surface", () => {
     expect(() => parseArgs(["--system1-backend"])).toThrow(/missing value/);
   });
 
+  it("accepts the three elicitation modes, and rejects anything else", () => {
+    for (const mode of ["defaults", "decline", "prompt"] as const) {
+      expect(parseArgs(["--elicitation", mode])).toMatchObject({ elicitation: mode });
+    }
+    expect(() => parseArgs(["--elicitation", "auto"])).toThrow(/defaults\|decline\|prompt/);
+  });
+
   it("rejects an invalid --default-risk", () => {
     expect(() => parseArgs(["--default-risk", "extreme"])).toThrow(/low\|medium\|high\|none/);
   });

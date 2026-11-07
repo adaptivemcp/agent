@@ -42,6 +42,11 @@ export interface ReplOptions extends Omit<RunAgentOptions, "messages" | "onEvent
   historyPath?: string;
   /** Text for `/metadata` (e.g. the derived tools-metadata view). */
   metadata?: () => string;
+  /**
+   * Install a reader for elicitation forms while the REPL owns the terminal. The toolset
+   * calls it per request, so the REPL sets it on start and clears it on exit.
+   */
+  setElicitationAsk?: (ask: ((question: string) => Promise<string>) | undefined) => void;
   /** Text for `/decoding <tool>`. */
   decodingFor?: (toolName: string) => string | undefined;
   /** Text for `/decoding-report` (accumulated decoding telemetry). */
@@ -100,6 +105,11 @@ export async function runRepl(options: ReplOptions): Promise<void> {
     terminal: Boolean((output as NodeJS.WriteStream).isTTY),
   });
   rl.on("SIGINT", () => rl.close());
+
+  // Elicitation forms are answered on the same reader as approvals: two readline
+  // interfaces on one stdin would fight over the terminal.
+  options.setElicitationAsk?.((question) => rl.question(question));
+  rl.on("close", () => options.setElicitationAsk?.(undefined));
 
   output.write(
     `${color.bold("adaptivemcp-agent")} ${color.dim("— interactive")}\n` +
