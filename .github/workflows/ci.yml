@@ -101,10 +101,10 @@ jobs:
 
   conformance-client:
     # The agent is an MCP *client*; this checks its wire behaviour against the official
-    # harness rather than our own fixtures (docs/conformance-client.md). Advisory for now:
-    # it fetches the harness with `npx`, so a registry or harness regression must not turn
-    # a green build red. Promote to blocking once a failure has been seen to be ours.
-    continue-on-error: true
+    # harness rather than our own fixtures (docs/conformance-client.md). Blocking: both
+    # graded scenarios pass, and the two failures the advisory phase produced were ours
+    # (a stale harness pin and a spawnSync deadlock in the adapter), not flakes — so a
+    # red run here means the client regressed.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout agent

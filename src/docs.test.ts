@@ -99,6 +99,18 @@ describe("documentation guards", () => {
     expect(tiers).not.toContain("We do not run");
     // AGENTS.md summarised the gaps too; the conformance item is no longer one of them.
     expect(readFileSync(join(REPO, "AGENTS.md"), "utf8")).not.toContain("no conformance run");
+
+    // The gate and the prose must agree: a job that fails the build cannot be described
+    // as advisory, and an advisory job must not be sold as a gate.
+    const job = ci.slice(ci.indexOf("conformance-client:"));
+    const isAdvisory = /continue-on-error:\s*true/.test(job.slice(0, 600));
+    const prose = readFileSync(join(REPO, "docs/conformance-client.md"), "utf8");
+    if (isAdvisory) {
+      expect(prose).toContain("advisory");
+    } else {
+      expect(prose).toContain("**blocking**");
+      expect(prose).not.toContain("continue-on-error: true");
+    }
   });
 
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {
