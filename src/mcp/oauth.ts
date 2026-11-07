@@ -39,9 +39,12 @@ export interface OAuthOptions {
   scopes?: string[];
 }
 
-export interface OAuthTokens {
-  accessToken: string;
-  tokenType: string;
+/** A live credential for one server: current header, and a way to replace it. */
+export interface OAuthSession {
+  /** `"Bearer <token>"` — read at request time, so a refresh is picked up immediately. */
+  header: () => string;
+  /** Ask the token endpoint for a new access token; returns the new header value. */
+  refresh: () => Promise<string>;
   /** Unix milliseconds, when the server returned `expires_in`. */
   expiresAt?: number;
   scope?: string;
@@ -99,7 +102,7 @@ export async function acquireToken(
   resourceUrl: string,
   options: OAuthOptions = {},
   deps: OAuthDependencies = {},
-): Promise<OAuthTokens> {
+): Promise<OAuthSession> {
   const fetchImpl = deps.fetch ?? fetch;
   const log = deps.log ?? (() => {});
   const mode = options.authorize ?? "browser";
@@ -111,24 +114,32 @@ export async function acquireToken(
       options.redirectUri ?? callback?.redirectUri ?? "http://127.0.0.1:8765/oauth/callback";
 
     // 1. Protected-resource metadata. A 401 that names it is authoritative; otherwise
-    // derive the RFC 9728 path-based location from the resource URL.
-    const metadataUrl =
-      (await challengedMetadataUrl(resourceUrl, fetchImpl)) ?? protectedResourceUrl(resourceUrl);
-    const prm = await getJson<ProtectedResourceMetadata>(fetchImpl, metadataUrl, "PRM metadata");
+    // try the RFC 9728 path-based location and then the root. The order matters: a server
+    // that publishes both (and traps the root) is answering the challenge, so the
+    // fallback only serves servers that advertise the metadata another way.
+    const challenged = await challengedMetadataUrl(resourceUrl, fetchImpl);
+    const prm = challenged
+      ? await getJson<ProtectedResourceMetadata>(fetchImpl, challenged, "PRM metadata")
+      : await firstJson<ProtectedResourceMetadata>(
+          fetchImpl,
+          [protectedResourceUrl(resourceUrl), protectedResourceRootUrl(resourceUrl)],
+          "PRM metadata",
+        );
     const issuer = prm.authorization_servers?.[0];
     if (!issuer) {
-      throw new Error(`OAuth: ${metadataUrl} lists no authorization_servers; cannot continue`);
+      throw new Error("OAuth: protected-resource metadata lists no authorization_servers");
     }
 
-    // 2. Authorization-server metadata, RFC 8414 path-aware.
-    const asMetadataUrl = authorizationServerMetadataUrl(issuer);
-    const as = await getJson<AuthorizationServerMetadata>(
+    // 2. Authorization-server metadata. RFC 8414 puts the well-known segment *before* the
+    // issuer's path; OpenID Discovery appends it; both spellings exist in the wild, as do
+    // servers publishing only the OIDC document. Try the standard order.
+    const as = await firstJson<AuthorizationServerMetadata>(
       fetchImpl,
-      asMetadataUrl,
+      authorizationServerMetadataUrls(issuer),
       "authorization-server metadata",
     );
     if (!as.authorization_endpoint || !as.token_endpoint) {
-      throw new Error(`OAuth: ${asMetadataUrl} lacks authorization_endpoint or token_endpoint`);
+      throw new Error(`OAuth: ${issuer} publishes no usable authorization_endpoint/token_endpoint`);
     }
     log(`[oauth] ${new URL(resourceUrl).host}: authorization server ${as.issuer ?? issuer}`);
 
@@ -189,21 +200,29 @@ export async function acquireToken(
       resource: resourceUrl,
     });
     if (clientSecret) body.set("client_secret", clientSecret);
-    const token = await postForm<{
-      access_token?: string;
-      token_type?: string;
-      expires_in?: number;
-      scope?: string;
-    }>(fetchImpl, as.token_endpoint, body, "token request");
-    if (!token.access_token) {
-      throw new Error("OAuth: token response has no access_token");
-    }
+    const issued = await tokenRequest(fetchImpl, as.token_endpoint, body);
 
+    let current = issued;
     return {
-      accessToken: token.access_token,
-      tokenType: token.token_type ?? "Bearer",
-      ...(token.expires_in ? { expiresAt: Date.now() + token.expires_in * 1000 } : {}),
-      ...(token.scope ? { scope: token.scope } : {}),
+      header: () => `${current.tokenType} ${current.accessToken}`,
+      refresh: async () => {
+        if (!current.refreshToken) {
+          throw new Error("OAuth: the token response carried no refresh_token");
+        }
+        const refreshBody = new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: current.refreshToken,
+          client_id: clientId,
+          resource: resourceUrl,
+        });
+        if (clientSecret) refreshBody.set("client_secret", clientSecret);
+        const refreshed = await tokenRequest(fetchImpl, as.token_endpoint as string, refreshBody);
+        // A refresh response may omit `refresh_token`; keep the one that still works.
+        current = { ...refreshed, refreshToken: refreshed.refreshToken ?? current.refreshToken };
+        return `${current.tokenType} ${current.accessToken}`;
+      },
+      ...(issued.expiresAt ? { expiresAt: issued.expiresAt } : {}),
+      ...(issued.scope ? { scope: issued.scope } : {}),
       issuer: as.issuer ?? issuer,
       clientId,
     };
@@ -227,6 +246,47 @@ export function authorizationServerMetadataUrl(issuer: string): string {
   const url = new URL(issuer);
   const path = url.pathname.replace(/^\/+|\/+$/g, "");
   return `${url.origin}/.well-known/oauth-authorization-server${path ? `/${path}` : ""}`;
+}
+
+/**
+ * Every location worth trying for authorization-server metadata, most standard first:
+ *
+ * 1. RFC 8414 with the issuer's path after the well-known segment;
+ * 2. OpenID Discovery in the same shape;
+ * 3. both spellings appended to the issuer (the pre-RFC form, and what the tenant
+ *    deployment in `auth/metadata-var3` publishes).
+ */
+export function authorizationServerMetadataUrls(issuer: string): string[] {
+  const url = new URL(issuer);
+  const path = url.pathname.replace(/^\/+|\/+$/g, "");
+  const suffix = path ? `/${path}` : "";
+  const bare = issuer.replace(/\/+$/, "");
+  return [
+    `${url.origin}/.well-known/oauth-authorization-server${suffix}`,
+    `${url.origin}/.well-known/openid-configuration${suffix}`,
+    `${bare}/.well-known/openid-configuration`,
+    `${bare}/.well-known/oauth-authorization-server`,
+  ];
+}
+
+/** The root protected-resource location (RFC 9728 origin-level form). */
+export function protectedResourceRootUrl(resourceUrl: string): string {
+  return `${new URL(resourceUrl).origin}/.well-known/oauth-protected-resource`;
+}
+
+/** First URL that answers `2xx` with JSON wins; otherwise the last error is thrown. */
+async function firstJson<T>(fetchImpl: typeof fetch, urls: string[], what: string): Promise<T> {
+  let lastError: unknown;
+  for (const url of urls) {
+    try {
+      return await getJson<T>(fetchImpl, url, what);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`OAuth: no ${what} found at ${urls.join(", ")}`);
 }
 
 /** Read `resource_metadata` from a 401 challenge, if the server offers one. */
@@ -344,6 +404,39 @@ async function startCallback(timeoutMs: number): Promise<Callback> {
       clearTimeout(timer);
       server.close();
     },
+  };
+}
+
+interface TokenResponse {
+  accessToken: string;
+  tokenType: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scope?: string;
+}
+
+/** Exchange a code or a refresh token at the token endpoint. */
+async function tokenRequest(
+  fetchImpl: typeof fetch,
+  tokenEndpoint: string,
+  body: URLSearchParams,
+): Promise<TokenResponse> {
+  const token = await postForm<{
+    access_token?: string;
+    token_type?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  }>(fetchImpl, tokenEndpoint, body, "token request");
+  if (!token.access_token) {
+    throw new Error("OAuth: token response has no access_token");
+  }
+  return {
+    accessToken: token.access_token,
+    tokenType: token.token_type ?? "Bearer",
+    ...(token.refresh_token ? { refreshToken: token.refresh_token } : {}),
+    ...(token.expires_in ? { expiresAt: Date.now() + token.expires_in * 1000 } : {}),
+    ...(token.scope ? { scope: token.scope } : {}),
   };
 }
 

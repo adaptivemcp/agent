@@ -271,11 +271,17 @@ async function main(): Promise<void> {
   for (const spec of serverSpecs) {
     if (!isHttpServerSpec(spec) || !spec.oauth) continue;
     try {
-      const token = await acquireToken(spec.url, spec.oauth, {
+      const session = await acquireToken(spec.url, spec.oauth, {
         log: (message) => console.error(message),
       });
-      spec.headers = { ...spec.headers, Authorization: `${token.tokenType} ${token.accessToken}` };
-      console.error(`[oauth] ${spec.serverName}: authenticated (client ${token.clientId})`);
+      spec.headers = { ...spec.headers, Authorization: session.header() };
+      // Refresh on 401 rather than at a clock: the token endpoint is the authority on
+      // expiry, and a refreshed token must reach the next request without reconnecting.
+      spec.auth = {
+        header: () => session.header(),
+        refresh: () => session.refresh(),
+      };
+      console.error(`[oauth] ${spec.serverName}: authenticated (client ${session.clientId})`);
     } catch (error) {
       console.error(
         `error: OAuth for server "${spec.serverName}" failed: ` +

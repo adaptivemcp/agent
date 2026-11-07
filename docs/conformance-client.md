@@ -53,6 +53,7 @@ npx -y @modelcontextprotocol/conformance@0.1.16 client \
 npx -y @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs --auth" --scenario auth/metadata-default \
   --timeout 60000 --output-dir conformance-results/auth-metadata-default
+# ...and the same loop for auth/metadata-var1 .. var3
 ```
 
 ## Measured 2026-11-07
@@ -92,7 +93,21 @@ upstream session) would have hidden both causes instead of fixing them.
 $ conformance client --command "node scripts/conformance-client.mjs --auth" \
     --scenario auth/metadata-default
 Passed: 13/13 — ✅ OVERALL: PASSED
+
+$ ... --scenario auth/metadata-var1   Passed: 13/13
+$ ... --scenario auth/metadata-var2   Passed: 13/13
+$ ... --scenario auth/metadata-var3   Passed: 13/13
 ```
+
+The variants are the point rather than a bonus: each publishes the metadata somewhere
+else, and the client has to find all four shapes.
+
+| Scenario           | What is different                                                         | How the client copes                                                               |
+| ------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `metadata-default` | PRM path-based, named in `WWW-Authenticate`                               | uses the challenge URL; never probes the root                                      |
+| `metadata-var1`    | no challenge metadata; AS metadata only as **OpenID configuration**       | falls back to the path-based PRM, then tries the OIDC document                     |
+| `metadata-var2`    | PRM only at the **root**; issuer has a **path**                           | falls back path-based → root; RFC 8414 puts the well-known segment before the path |
+| `metadata-var3`    | custom PRM path named in the challenge; **tenant-prefixed** OIDC metadata | uses the challenge URL, then the appended OIDC spelling                            |
 
 The first measurement of this scenario **failed 0/5**: the client stopped at the harness's
 `401`. That was accurate at the time — `HttpToolset` only sent static headers. It now
@@ -121,8 +136,18 @@ prints the URL, and waits for the redirect a person completes; `"fetch"` perform
 redirect itself, which is what a headless driver — the conformance adapter with `--auth` —
 uses. The adapter sets it; no environment variable or test-only branch is involved.
 
-Not yet implemented, and left visible rather than implied: **token refresh** inside a long
-session. The token is acquired for the run; `expires_in` is recorded.
+**Refresh is wired, on the 401 rather than the clock.** `acquireToken` returns a session
+whose `header()` is read per request; `HttpToolset` refreshes once and retries when a
+request comes back `401`, then gives up rather than looping. The token endpoint is the
+authority on expiry, and a refreshed token reaches the next request without reconnecting
+(reconnecting would lose the session id). Tested two ways: the refresh grant itself
+(`src/mcp/oauth.test.ts`) and the 401 → refresh → retry path against a real HTTP MCP server
+(`src/mcp/http-refresh.integration.test.ts`).
+
+**The loopback path has a test too.** `browser` mode prints a URL and waits on a listener;
+the test reads that URL from the log, fetches it the way a browser would, and asserts the
+flow completes through the callback. A human is still the intended actor, but the code path
+is no longer untested.
 
 CI runs this scenario with `--auth` and without any expected-failures baseline. The
 baseline from the measurement above was deleted in the same change, because a stale entry

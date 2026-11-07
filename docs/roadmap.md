@@ -9,22 +9,18 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. More OAuth scenarios, and token refresh
+### 1. More OAuth scenarios
 
-`auth/metadata-default` **passes 13/13** (#109) with discovery, dynamic registration, PKCE
-S256 and a resource-bound token (`src/mcp/oauth.ts`). The harness also grades variants
-worth covering: `auth/metadata-var1..3` (root vs path-based PRM, OpenID configuration,
-tenant-prefixed issuers), scope step-up, token-endpoint auth styles, resource mismatch.
+All four metadata shapes pass (`auth/metadata-default` and `var1..3`, 13/13 each), refresh
+is wired on `401`, and the loopback callback path is tested by driving its listener.
 
-Two known gaps, kept visible:
+What the harness still grades and this client does not yet exercise: **scope step-up**
+(a `403` that names required scopes), **resource mismatch** (a token issued for another
+server must be refused), and the **token-endpoint auth styles** (`basic`, `post`, `none`).
+Those are correctness properties with security weight, not extra credit.
 
-- **Token refresh inside a run.** `expires_in` is recorded but not honoured; a long
-  session would start failing when the token expires.
-- **The interactive browser flow is untested end-to-end.** The conformance run uses
-  `authorize: "fetch"`; the loopback listener path has no automated test (a human is in it).
-
-**Done when:** the metadata variants pass, refresh is covered by a test that forces expiry,
-and the loopback path has a test that drives its callback server directly.
+**Done when:** `auth/scope-step-up` and `auth/resource-mismatch` pass or are baselined with
+reasons, and the token-endpoint-auth scenarios report the style actually used.
 
 ### 2. Roadmap and security posture stay current
 
