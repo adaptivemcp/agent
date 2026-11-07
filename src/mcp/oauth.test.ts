@@ -1,12 +1,13 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   acquireToken,
   authorizationServerMetadataUrl,
   authorizationServerMetadataUrls,
   parseChallenge,
+  privateKeyAssertion,
   protectedResourceUrl,
   sameResource,
 } from "./oauth.js";
@@ -340,6 +341,90 @@ describe("OAuth discovery and authorization", () => {
     expect(sameResource("https://host.example/mcp/", "https://host.example/mcp")).toBe(true);
     expect(sameResource("https://evil.example.com/mcp", "https://host.example/mcp")).toBe(false);
     expect(sameResource("https://host.example/other", "https://host.example/mcp")).toBe(false);
+  });
+
+  it("requests a client_credentials token without an authorization step", async () => {
+    const posted: URLSearchParams[] = [];
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        resource: "https://host.example/mcp",
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+        token_endpoint_auth_methods_supported: ["client_secret_basic"],
+      },
+      "https://host.example/token": (url: string) => {
+        void url;
+        posted.push(new URLSearchParams("grant_type=client_credentials"));
+        return { access_token: "machine-token", token_type: "Bearer", expires_in: 60 };
+      },
+    });
+
+    const session = await acquireToken(
+      "https://host.example/mcp",
+      { authorize: "fetch", grant: "client_credentials", clientId: "svc", clientSecret: "s3cret" },
+      { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+    );
+
+    expect(session.header()).toBe("Bearer machine-token");
+    // The whole point of the grant: no authorization request was ever made.
+    expect(seen.some((url) => url.includes("/authorize"))).toBe(false);
+    expect(seen.some((url) => url.startsWith("https://host.example/token"))).toBe(true);
+  }, 20_000);
+
+  it("refuses client_credentials without a pre-registered identity", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+      },
+    });
+
+    await expect(
+      acquireToken(
+        "https://host.example/mcp",
+        { authorize: "fetch", grant: "client_credentials" },
+        { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+      ),
+    ).rejects.toThrow(/needs a pre-registered client id/);
+  }, 20_000);
+
+  it("signs a private_key_jwt assertion that verifies and names the client and server", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const privatePem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const publicPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+
+    const assertion = privateKeyAssertion("svc-client", privatePem, "https://host.example");
+    const [header, payload, signature] = assertion.split(".");
+    expect(JSON.parse(Buffer.from(header as string, "base64url").toString())).toEqual({
+      alg: "ES256",
+      typ: "JWT",
+    });
+    const claims = JSON.parse(Buffer.from(payload as string, "base64url").toString());
+    expect(claims).toMatchObject({
+      iss: "svc-client",
+      sub: "svc-client",
+      aud: "https://host.example",
+    });
+    expect(claims.exp - claims.iat).toBe(300);
+
+    // The signature must verify with the matching public key, in JWS (raw) encoding.
+    const valid = verify(
+      "sha256",
+      Buffer.from(`${header}.${payload}`),
+      { key: publicPem, dsaEncoding: "ieee-p1363" },
+      Buffer.from(signature as string, "base64url"),
+    );
+    expect(valid).toBe(true);
   });
 
   it("parses a step-up challenge", () => {
