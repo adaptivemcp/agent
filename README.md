@@ -512,9 +512,13 @@ TelemetryRecorder → MemoryStore → Evaluator / GraphAnalyzer → ExtensionCon
 
 See [`docs/architecture.md`](./docs/architecture.md) and [`AGENTS.md`](./AGENTS.md).
 The five agent archetypes, their components, and where this host stands against
-them: [`docs/archetypes/`](./docs/archetypes/README.md).
+them: [`docs/archetypes/`](./docs/archetypes/README.md). What ships next, and the
+evidence that would justify it: [`docs/roadmap.md`](./docs/roadmap.md).
 
 ## Security
+
+How to report a vulnerability privately, the trust boundaries, and the mitigations:
+[`SECURITY.md`](./SECURITY.md). The short version:
 
 - **Local by default.** The stdio transport spawns a local MCP server, which is
   what the examples and the whole test suite use.

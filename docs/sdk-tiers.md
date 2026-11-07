@@ -18,18 +18,19 @@ the parts of the protocol we _do_ implement, and it is a fair critique of this r
 | **Critical bug resolution**         | ◐      | `P0`–`P3` replace the old `priority:high`/`medium`/`low` labels (existing issues migrated: high→`P1`, medium→`P2`, low→`P3`), so the metric is computable. No 7-day resolution commitment is published because we are not claiming a tier.                                                                                                                                                                                                |
 | **Stable release**                  | ◐      | `0.5.0`, released by the two-phase script (`pnpm release:prepare` then `pnpm release:publish --otp`), which verifies the registry serves the version before it tags — so a tag is never a claim the registry cannot back. Tiers define stable as `1.0.0`+ without pre-release identifiers.                                                                                                                                                |
 | **Documentation**                   | ✓      | `AGENTS.md` (canonical architecture), `README.md`, `docs/architecture.md`, `docs/adr/` (4 ADRs), `docs/archetypes/` (7 files incl. a gap backlog), and a docs guard (`src/docs.test.ts`) that fails on broken links or cited paths that do not exist.                                                                                                                                                                                     |
-| **Dependency policy**               | ✗      | There is no `SECURITY.md` and no published policy. Core ranges are bumped by hand after each `@adaptivemcp/*` release, and nothing automates or records why a version moved.                                                                                                                                                                                                                                                              |
-| **Roadmap**                         | ✗      | No roadmap document. `docs/archetypes/README.md` (gap backlog) and ADR-004 (deferred supply chain) are the closest thing, but they are a catalogue and a decision, not "what ships next".                                                                                                                                                                                                                                                 |
+| **Dependency policy**               | ◐      | `SECURITY.md` states the private reporting path, trust boundaries and mitigations, and private vulnerability reporting is enabled on the repository. Still missing: nothing records _why_ a core range moved — bumps are by hand after each `@adaptivemcp/*` release, and `pnpm audit --prod` is a manual pre-release step.                                                                                                               |
+| **Roadmap**                         | ✓      | `docs/roadmap.md`: what ships next, in order, each item with the evidence that would justify it and a "deliberately not doing" list. Written 2026-11-07 as a proposal — ordering and scope are the maintainer's call — with a stated cadence (re-read at each release, delete what no longer matters).                                                                                                                                    |
 | **Conformance score / advancement** | N/A    | Only applies to SDKs applying for a tier.                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## What we would change first
 
-1. **Add `SECURITY.md`.** A published package with no threat model or reporting path
-   is the largest single gap here, and the sibling `adaptive-mcp` already has a good
-   one to model it on.
-2. **Write the roadmap.** The archetype gap table says what is _missing_; it does not
-   say what is _next_. A short roadmap document with the next few items and their
-   status is enough to satisfy the requirement honestly.
-3. ~~**Run the conformance suite against the client.**~~ **Done 2026-11-07** — the
-   `conformance-client` CI job runs both graded scenarios, both pass, and the job is
-   blocking.
+All three original items landed on 2026-11-07:
+
+1. ~~**Add `SECURITY.md`.**~~ Done — reporting path, trust boundaries, mitigations, and
+   private vulnerability reporting enabled on the repository.
+2. ~~**Write the roadmap.**~~ Done — `docs/roadmap.md`, proposal status stated.
+3. ~~**Run the conformance suite against the client.**~~ Done — the `conformance-client`
+   CI job runs both graded scenarios, both pass, and the job is blocking.
+
+What is left is smaller and mostly maintenance: record _why_ dependency ranges move, and
+extend conformance to the `auth/*` scenarios (the roadmap's first item).
