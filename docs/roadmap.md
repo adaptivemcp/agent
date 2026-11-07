@@ -9,15 +9,22 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. Auth client scenarios in conformance
+### 1. OAuth discovery in the CLI path
 
-The client job runs `initialize` and `tools_call` and both pass. The harness also grades
-`auth/*`: metadata discovery, scope step-up, token-endpoint auth styles, resource
-mismatch. The agent already ships static headers and `OAuthMiddleware`, and none of that
-path has been measured against the harness.
+`initialize` and `tools_call` pass; `auth/metadata-default` now runs in CI and is
+**baselined**. The client stops at the harness's `401` because the CLI only sends static
+headers, so all five discovery checks are missing (PRM request, AS metadata, registration,
+authorization request, token request).
 
-**Done when:** at least `auth/metadata-default` runs against the adapter, and the failures
-it produces are either fixed or recorded as a baseline with reasons.
+Implement PRM discovery → AS metadata → registration → authorization request → token
+request, then delete the baseline entry — a stale entry fails CI, so the removal cannot be
+forgotten. `OAuthMiddleware` in `@adaptivemcp/thin-client` already handles
+401 → refresh → retry (`src/mcp/http-oauth.integration.test.ts`); what is missing is
+discovery and per-server CLI configuration.
+
+**Measured 2026-11-07:** the scenario runs; the failures are recorded in
+`conformance-client-baseline.yml` with reasons, and CI enforces both directions (a
+regression fails; a fix fails as stale until the line is deleted).
 
 **Why now:** it is the largest untested protocol surface, and the harness is already wired.
 

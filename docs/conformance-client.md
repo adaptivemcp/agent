@@ -28,8 +28,8 @@ connection, not about what a model does with the answer.
 ## In CI
 
 The `conformance-client` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
-runs both scenarios on every push and pull request, writing
-`conformance-results/<scenario>/` and uploading it as an artifact (`checks.json`,
+runs every scenario below on each push and pull request, writing
+`conformance-results/<scenario>/` and uploading the lot as an artifact (`checks.json`,
 `stdout.txt`, `stderr.txt`).
 
 It is **blocking**. The advisory phase did its job: both failures it surfaced were ours,
@@ -48,6 +48,12 @@ npx -y @modelcontextprotocol/conformance@0.1.16 client \
 npx -y @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs --call" --scenario tools_call \
   --output-dir conformance-results/tools_call
+
+# measured gap, baselined — see "Auth" below
+npx -y @modelcontextprotocol/conformance@0.1.16 client \
+  --command "node scripts/conformance-client.mjs" --scenario auth/metadata-default \
+  --timeout 60000 --expected-failures conformance-client-baseline.yml \
+  --output-dir conformance-results/auth-metadata-default
 ```
 
 ## Measured 2026-11-07
@@ -80,6 +86,47 @@ Getting there took two fixes, both recorded because each looked like a client bu
 
 No proxy was needed. The workaround under consideration (a loopback proxy holding one
 upstream session) would have hidden both causes instead of fixing them.
+
+### Auth: measured, and deliberately baselined
+
+```
+$ conformance client --command "node scripts/conformance-client.mjs" \
+    --scenario auth/metadata-default
+Sent 401 response for POST /mcp (method: initialize)
+Client exited with code 1
+Passed: 0/5, 5 failed
+  Expected Check Missing: prm-pathbased-requested
+  Expected Check Missing: authorization-server-metadata
+  Expected Check Missing: client-registration
+  Expected Check Missing: authorization-request
+  Expected Check Missing: token-request
+```
+
+The harness answers the first `POST /mcp` with `401` + `WWW-Authenticate`, and the client
+stops there. That is accurate rather than a surprise: `HttpToolset` sends **static
+headers**, and while `OAuthMiddleware` exists in `@adaptivemcp/thin-client` (covered by
+`src/mcp/http-oauth.integration.test.ts`, including a 401 → refresh → retry), the CLI has
+no per-server OAuth configuration and nothing performs protected-resource-metadata
+discovery or dynamic client registration.
+
+CI runs this scenario against `conformance-client-baseline.yml`, which lists
+`auth/metadata-default`. That is a **measured gap, not a suppression** — the harness's
+rules make it symmetric:
+
+| Outcome                  | Exit                            |
+| ------------------------ | ------------------------------- |
+| fails and is listed      | 0 (expected)                    |
+| fails and is not listed  | 1 (regression)                  |
+| **passes and is listed** | **1 (stale entry — delete it)** |
+
+Verified both directions locally: with the baseline the run exits 0 ("Baseline check
+passed: all failures are expected"); listing a scenario that passes (`initialize`) exits 1
+with "Baseline is stale". So implementing the flow cannot silently leave a stale file
+behind.
+
+The roadmap's first item is consequently narrower than "add auth conformance": implement
+PRM discovery → AS metadata → registration → authorization request → token request in the
+CLI path, then delete the baseline entry.
 
 ## What running it found in the agent
 

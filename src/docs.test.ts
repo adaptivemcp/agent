@@ -133,6 +133,22 @@ describe("documentation guards", () => {
     expect(readFileSync(security, "utf8")).toContain("Report a vulnerability");
   });
 
+  it("the conformance baseline is a real file the CI step references", () => {
+    // A baseline that drifts from the workflow is either dead config or a silently
+    // unmeasured gap. Both directions matter: the file must exist, list the scenario the
+    // step runs, and be explained in the docs.
+    const ci = readFileSync(join(REPO, ".github/workflows/ci.yml"), "utf8");
+    if (!ci.includes("conformance-client-baseline.yml")) return;
+
+    const baseline = join(REPO, "conformance-client-baseline.yml");
+    expect(existsSync(baseline), "the referenced baseline file must exist").toBe(true);
+    const text = readFileSync(baseline, "utf8");
+    expect(text).toContain("auth/metadata-default");
+    // The entries are measured gaps, and the docs have to say so rather than leaving a
+    // reader to guess whether this is a suppression.
+    expect(readFileSync(join(REPO, "docs/conformance-client.md"), "utf8")).toContain("baselined");
+  });
+
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {
     const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;
