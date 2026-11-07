@@ -94,7 +94,9 @@ do nothing at all in the REPL.)
 - **Context catalog.** `--list-context` (one-shot) and the REPL's `/context` show
   what the agent currently carries: the prompt sections that are loaded, plus the
   skills, MCP resources and tools it could load, each with its source and an
-  estimated token cost. The run summary reports the prompt's size as
+  estimated token cost. When the store reports them, a `loads` column shows how often
+  each item has been loaded across runs, so the catalog distinguishes what is new from
+  what keeps earning its tokens. The run summary reports the prompt's size as
   `context=<n>tok(est)` — an estimate, never presented as usage. Selection,
   retrieval and retention are separate concerns and not built yet (ADR-005 in
   `adaptive-mcp`).

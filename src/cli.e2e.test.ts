@@ -299,9 +299,9 @@ describe("cli, end to end and offline", () => {
     const store = new MemoryStore({ path: db });
     const tasks = store.getTasks?.("cli-e2e-mode") ?? [];
     store.close();
-    expect(tasks.map((task) => ({ id: task.id, status: task.status, result: task.result }))).toEqual([
-      { id: "t1", status: "completed", result: "parser written" },
-    ]);
+    expect(
+      tasks.map((task) => ({ id: task.id, status: task.status, result: task.result })),
+    ).toEqual([{ id: "t1", status: "completed", result: "parser written" }]);
 
     rmSync(dir, { recursive: true, force: true });
   }, 30_000);
@@ -758,6 +758,39 @@ describe("cli, end to end and offline", () => {
     expect(run.stdout).toMatch(/\[context\] \d+ item\(s\); \d+ loaded/);
 
     rmSync(skillsDir, { recursive: true, force: true });
+  }, 30_000);
+
+  it("learns context loads across runs, and shows them next to each item", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-e2e-context-loads-"));
+    const db = join(dir, "loads.db");
+    const run = () =>
+      runCli([
+        "--list-context",
+        "--server",
+        serverSpec(),
+        "--base-url",
+        "http://127.0.0.1:1/v1",
+        "--api-key",
+        "test-key",
+        "--no-ollama",
+        "--db",
+        db,
+        "--session",
+        "cli-e2e-context-loads",
+      ]);
+
+    const first = await run();
+    const second = await run();
+
+    expect(first.code).toBe(0);
+    expect(second.code).toBe(0);
+    // The catalog grows a `loads` column, and the run records its own sections before
+    // printing: the second run sees the first run's load.
+    expect(first.stdout.split("\n")[0]).toBe("state\tkind\tname\tsource\tcost\tloads");
+    expect(first.stdout).toMatch(/loaded\tsection\tbase\tbuilt-in\t\d+tok\(est\)\t1/);
+    expect(second.stdout).toMatch(/loaded\tsection\tbase\tbuilt-in\t\d+tok\(est\)\t2/);
+
+    rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 
   it("reads an MCP resource on demand, without its content riding in the prompt", async () => {

@@ -130,12 +130,25 @@ export function loadedContextTokens(items: ContextItem[]): number {
  */
 export function formatContextCatalog(
   items: ContextItem[],
-  options: { summary?: string } = {},
+  options: {
+    summary?: string;
+    /** Recorded load counts, when the store can report them (ADR-005 P1). */
+    loads?: ReadonlyMap<string, number>;
+  } = {},
 ): string {
   if (items.length === 0) return "[context] nothing discovered";
-  const lines = items.map((item) =>
-    [item.state, item.kind, item.name, item.source, `${item.tokens}tok(est)`].join("\t"),
-  );
+  const { loads } = options;
+  const row = (item: ContextItem): string => {
+    const cells = [item.state, item.kind, item.name, item.source, `${item.tokens}tok(est)`];
+    // An item the store has never seen reports 0 rather than being omitted: "never
+    // loaded" is information, and a missing column would be indistinguishable from a
+    // build that does not record loads at all.
+    if (loads) cells.push(String(loads.get(item.name) ?? 0));
+    return cells.join("\t");
+  };
+  const lines: string[] = [];
+  if (loads) lines.push(["state", "kind", "name", "source", "cost", "loads"].join("\t"));
+  lines.push(...items.map(row));
   const loaded = items.filter((item) => item.state === "loaded");
   const dropped = items.filter((item) => item.state === "dropped").length;
   lines.push(
