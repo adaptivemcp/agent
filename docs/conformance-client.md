@@ -299,8 +299,17 @@ the JWKS remain the provider's.
 | The provider's code exchange returns a token whose `iss` is the realm                                  | ✅     |
 | `refresh()` re-requests and the provider issues a **different** access token (`jti` differs)           | ✅     |
 
-**Still not live:** `jwt_bearer` needs an IdP that issues ID-JAGs, which Keycloak does not
-implement.
+**Still not live, but no longer untested end-to-end.** No provider we can run issues ID-JAGs,
+so `jwt_bearer` is exercised against an offline fixture instead:
+`src/oauth-jwt-bearer.e2e.test.ts` starts an identity provider that performs the RFC 8693
+exchange and mints an **ES256 ID-JAG**, and an authorization server that verifies that
+signature and audience before issuing a token. Nothing is mocked in the middle — real HTTP,
+real JWT signing, real signature verification — and it runs in CI (no harness, no network).
+
+It asserts every exchange parameter (`grant_type`, `subject_token`, `requested_token_type`,
+`audience`, `resource`), that the assertion grant presents the ID-JAG with
+`client_secret_basic`, and that a JAG the server would reject aborts the login instead of
+yielding a token.
 
 ## What running it found in the agent## What running it found in the agent
 
