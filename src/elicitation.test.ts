@@ -111,6 +111,62 @@ describe("elicitation handler", () => {
   });
 });
 
+describe("per-field re-edit from the review", () => {
+  const TWO = {
+    requestedSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, age: { type: "integer" } },
+    },
+  };
+
+  it("re-asks one field and keeps the others", async () => {
+    const asked: string[] = [];
+    const answers = ["Ada", "41", "edit name", "Grace", "y"];
+    const result = await readForm(TWO, async (question) => {
+      asked.push(question);
+      return answers.shift() ?? "";
+    });
+
+    expect(result).toEqual({ action: "accept", content: { name: "Grace", age: 41 } });
+    // Only `name` was asked again, not the whole form.
+    expect(asked.filter((line) => line.startsWith("  name")).length).toBe(2);
+    expect(asked.filter((line) => line.startsWith("  age")).length).toBe(1);
+  });
+
+  it("drops a field cleared during an edit instead of sending a stale value", async () => {
+    const answers = ["Ada", "41", "edit name", "", "y"];
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "accept", content: { age: 41 } });
+  });
+
+  it("reports an unknown field name and asks again without spending the review", async () => {
+    const notes: string[] = [];
+    const answers = ["Ada", "41", "edit nope", "y"];
+    const result = await readForm(
+      TWO,
+      async () => answers.shift() ?? "",
+      (line) => notes.push(line),
+    );
+
+    expect(result.action).toBe("accept");
+    expect(notes.some((line) => line.includes('no field named "nope"'))).toBe(true);
+  });
+
+  it("declines when the edited value is rejected twice", async () => {
+    const answers = ["Ada", "41", "edit age", "nope", "still-nope"];
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "decline" });
+  });
+
+  it("bounds the number of edits", async () => {
+    // Six edits to the same field: the sixth is refused rather than letting the review loop.
+    const answers = ["Ada", "41"];
+    for (let i = 0; i < 6; i += 1) answers.push("edit name", `N${i}`);
+    const result = await readForm(TWO, async () => answers.shift() ?? "");
+    expect(result).toEqual({ action: "decline" });
+  });
+});
+
 describe("url-mode elicitation", () => {
   const URL_REQUEST = {
     mode: "url",
