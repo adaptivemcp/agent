@@ -84,6 +84,25 @@ do nothing at all in the REPL.)
   there is nobody to ask, so such a tool is denied (fail closed)** — the tool
   does not run, the call is recorded as a failure, and the run exits `4`. Pass
   `--yes` to auto-approve instead; that is the only way to opt in.
+- **Elicitation.** A server can ask the client for input mid-call (`elicitation/create`).
+  The capability is **off unless asked for**, because a server should not ask a host that
+  cannot answer:
+
+  | Flag                     | Behaviour                                                                                                                                                                                                                                              |
+  | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | `--elicitation prompt`   | shows the whole form, asks one field at a time (schema-typed: integer, number, boolean, enum, arrays as JSON), then shows a **review** of exactly what will be sent — `edit <field>` re-opens one field, `n` re-enters the form, `submit? [Y/n]` sends |
+  | `--elicitation defaults` | accepts with the schema's declared defaults (SEP-1034) — for headless runs                                                                                                                                                                             |
+  | `--elicitation decline`  | refuses                                                                                                                                                                                                                                                |
+
+  Only declared defaults are filled; a field with no default stays omitted. A value the
+  schema rejects is asked once more, then the request is declined. **URL-mode** requests show
+  the link in prompt mode and accept only after you confirm you completed the flow there
+  (a `file:`/`javascript:` URL is refused without being displayed, and headless modes
+  decline). After a confirmation the client waits briefly for the server's
+  `notifications/elicitation/complete` and reports whether it corroborated your answer — it
+  corroborates, it does not gate. In the REPL the form uses the REPL's own reader, so it does
+  not fight the prompt for the terminal; with no TTY, prompt mode declines.
+
 - **Pausing a run.** In a non-interactive run, `--pause` turns a
   `require_confirmation` into a **suspension** instead of a denial: the question is
   recorded, the run stops with exit `5`, and the work is _waiting_ rather than lost.
@@ -260,6 +279,38 @@ adaptivemcp-agent --server '{"name":"qc","command":"qc","args":["mcp"],"cwd":"/p
 # remote HTTP (needs auth on the server side)
 adaptivemcp-agent --server '{"name":"qc","url":"https://qc.example.com/mcp"}'
 ```
+
+### Authentication for remote servers
+
+Static credentials are the simplest case — put an `Authorization` header on the spec. For a
+server that advertises OAuth, opt in per server and the CLI does discovery and the grant:
+
+```bash
+# OAuth 2.1 authorization code, opened in a browser (default)
+adaptivemcp-agent --server '{"name":"remote","url":"https://host/mcp","oauth":{}}'
+
+# headless: follow the redirect without a browser
+adaptivemcp-agent --server '{"name":"remote","url":"https://host/mcp","oauth":{"authorize":"fetch"}}'
+```
+
+The `oauth` object accepts:
+
+| Key                                                                         | Meaning                                                                                                                                                                    |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorize`                                                                 | `browser` (default; loopback callback, prints the URL) or `fetch` (headless driver)                                                                                        |
+| `redirectUri` / `clientName` / `scopes`                                     | callback override, registration name, requested scopes                                                                                                                     |
+| `grant`                                                                     | `authorization_code` (default), `client_credentials` (machine-to-machine), `jwt_bearer` (enterprise managed OAuth / SEP-990)                                               |
+| `clientId`, `clientSecretEnv`                                               | pre-registered client; the **secret comes from an env var**, never argv or config                                                                                          |
+| `clientPrivateKeyEnv`                                                       | PEM key for `private_key_jwt` (ES256) client authentication                                                                                                                |
+| `clientMetadataUrl`                                                         | Client ID Metadata Document URL, used when the server advertises CIMD                                                                                                      |
+| `idTokenEnv`, `idpTokenEndpoint`, `idpIssuer`, `idpClientId`, `idpAudience` | `jwt_bearer`: the operator's IdP ID token (env), and the IdP endpoint or issuer (the endpoint is discovered from `{issuer}/.well-known/openid-configuration` when omitted) |
+
+What the client does, in the flow the server chooses: path-based protected-resource
+metadata, RFC 8414/OpenID authorization-server metadata, dynamic registration (or the
+configured identity), PKCE **S256** with a `resource`-bound token, refresh on `401`, and
+scope step-up on `403 insufficient_scope`. `client_credentials` never performs an
+authorization request; `jwt_bearer` exchanges the ID token for an ID-JAG and presents that.
+A PRM that names a different origin is refused before anything is authorized.
 
 ## Models
 

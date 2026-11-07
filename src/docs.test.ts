@@ -178,6 +178,27 @@ describe("documentation guards", () => {
     expect(docs).toContain("baselined");
   });
 
+  it("the user-facing flags and grant modes are documented", () => {
+    // README is where a user learns a flag exists. These surfaces were shipped without
+    // being documented, and no path/link check can see an omission — so probe the code.
+    const readme = readFileSync(join(REPO, "README.md"), "utf8");
+    const agents = readFileSync(join(REPO, "AGENTS.md"), "utf8");
+    const args = readFileSync(join(REPO, "src/cli-args.ts"), "utf8");
+    const oauth = readFileSync(join(REPO, "src/mcp/oauth.ts"), "utf8");
+
+    if (args.includes('"--elicitation"')) {
+      expect(readme, "README must document --elicitation").toContain("--elicitation");
+      expect(agents, "AGENTS.md must describe elicitation").toContain("Elicitation");
+    }
+    for (const grant of ["client_credentials", "jwt_bearer"]) {
+      if (!oauth.includes(`"${grant}"`)) continue;
+      expect(readme, `README must document the ${grant} grant`).toContain(grant);
+    }
+    // The architecture note should point at the modules that own these seams.
+    expect(agents).toContain("src/mcp/oauth.ts");
+    expect(agents).toContain("src/elicitation.ts");
+  });
+
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {
     const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as {
       dependencies: Record<string, string>;

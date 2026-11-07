@@ -116,7 +116,13 @@ gate measures is the library core and adapters, by import.
 
 **CI** (`.github/workflows/ci.yml`) enforces the same on push/PR. The
 `@adaptivemcp/*` dependencies come from npm (they are published, not `link:`ed),
-so CI installs from the registry and needs no sibling checkout. CI runs **Node
+so CI installs from the registry and needs no sibling checkout. The `conformance-client` job runs the official client harness against
+`scripts/conformance-client.mjs`, whose flags select the interaction a scenario grades:
+`--call` (a scripted model asks for a tool), `--auth` (OAuth discovery), `--client-credentials`
+and `--cross-app` (the two machine grants), `--elicitation` (SEP-1034 defaults). Every client
+scenario the harness ships passes; there is no expected-failures baseline.
+
+CI runs **Node
 26** (the documented recommendation), where `node:sqlite` is available without a
 flag; the optional `integration-qc` job is gated on the `QC_E2E_ENABLED`
 variable (the QC repo is public, so no token is needed).
@@ -275,6 +281,29 @@ through `runtime.adaptive.memory.recordContext?.()` (best-effort — the store's
 optional), and `formatContextCatalog(items, { loads })` prints how often each item has been
 loaded. That is the first half of ADR-005's P1 on the host side; selection still does not
 read it, because the benchmark has not shown selection to be worth building (#75).
+
+**Remote-server auth** (`src/mcp/oauth.ts`) is the client half of MCP authorization: path-based
+protected-resource metadata (a PRM naming another origin is refused before anything is
+authorized), RFC 8414/OpenID authorization-server metadata, dynamic registration or a
+configured identity, PKCE S256 with an RFC 8707 `resource`, refresh on `401`, and scope
+step-up on `403 insufficient_scope`. Three grants are explicit modes rather than one flow with
+switches: `authorization_code` (a person), `client_credentials` (machine-to-machine, no
+authorization request, refuses to start without a pre-registered identity), and `jwt_bearer`
+(SEP-990: exchange an IdP ID token for an ID-JAG, RFC 8693, then present it; the IdP token
+endpoint is discovered from the issuer's OIDC document when not configured). Client
+authentication follows what the server advertises — `client_secret_basic`, `_post`,
+`private_key_jwt` (ES256) or a CIMD URL client id. **Secrets and tokens are passed by env-var
+name** (`clientSecretEnv`, `clientPrivateKeyEnv`, `idTokenEnv`), never in argv.
+
+**Elicitation** (`src/elicitation.ts`) answers a server's `elicitation/create` request, and is
+**off unless `--elicitation` is given**: a server should not ask a host that cannot answer.
+`defaults` accepts with the schema's declared defaults (SEP-1034); `decline` refuses;
+`prompt` renders the whole form, reads schema-typed answers (arrays as JSON), shows a review
+where `edit <field>` re-opens one field and `submit? [Y/n]` sends, and declines rather than
+sending a value the schema rejected twice. URL-mode requests show the link in prompt mode,
+refuse a non-http(s) URL without displaying it, and — after a confirmation — wait briefly for
+`notifications/elicitation/complete`, which corroborates the person's answer rather than gating
+it. In the REPL the form borrows the REPL's readline; with no TTY, prompt mode declines.
 
 **MCP resources** (`src/resources.ts`) are the first context source that is external to
 the host: the servers list them, the prompt carries a one-line index (`name: uri`), and
