@@ -58,6 +58,11 @@ export interface CliArgs {
   skillsList: boolean;
   /** Local fallback risk for tools whose server ships no MCP annotations. */
   defaultRisk: "low" | "medium" | "high" | "none";
+  /**
+   * How to answer a server's elicitation request: apply the schema's defaults, decline, or
+   * (unset) do not advertise the capability at all.
+   */
+  elicitation?: "defaults" | "decline";
   /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
   awaitJobs: boolean;
   db?: string;
@@ -263,6 +268,14 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
           throw new Error(`--default-risk expects low|medium|high|none, got "${value}"`);
         }
         args.defaultRisk = value;
+        break;
+      }
+      case "--elicitation": {
+        const value = next();
+        if (value !== "defaults" && value !== "decline") {
+          throw new Error(`--elicitation expects defaults|decline, got "${value}"`);
+        }
+        args.elicitation = value;
         break;
       }
       case "--db":
@@ -551,6 +564,9 @@ Options:
   --system1-backend <tier>      Decision tier(s): ollama|openai; a comma list (ollama,openai)
                                 enables failover with one fallback per decision call
                                 (default: $SYSTEM1_BACKEND, ollama)
+  --elicitation <mode>          Answer server elicitation requests: defaults (apply the
+                                schema's declared defaults) or decline; unset means the
+                                capability is not advertised at all
   --default-risk <level>        Risk for tools whose server sends no MCP annotations
                                 (low|medium|high|none; default medium)
   --await-jobs                  Poll long-running tool jobs (job handles) to completion

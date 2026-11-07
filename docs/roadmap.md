@@ -11,19 +11,30 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ### 1. Machine-to-machine and delegation grants
 
-The interactive side of OAuth is measured: 19 client scenarios pass, and the three that do
-not are **baselined with reasons** — `client-credentials-basic`, `client-credentials-jwt`
-and `cross-app-access-complete-flow` (see `docs/conformance-client.md`).
+Every client conformance scenario the harness ships with the standard suite now runs:
+**20 pass, 3 are baselined with reasons** (`client-credentials-basic`,
+`client-credentials-jwt`, `cross-app-access-complete-flow` — see
+`docs/conformance-client.md`). Elicitation defaults and SSE retry closed the last two
+measurements.
 
-They are one coherent next step rather than three: a **non-interactive grant mode**
-(`oauth.grant: "client_credentials"`, no authorization request, no PKCE) and the signed-JWT
-assertion for `client-credentials-jwt`. Token exchange between applications is a further
-step and needs a caller that actually delegates.
+The baselined three are one coherent next step: a **non-interactive grant mode**
+(`client_credentials`, no authorization request, no PKCE), the signed-JWT assertion for
+`client-credentials-jwt`, and — separately, needing a real delegating caller — token
+exchange between applications.
 
 **Done when:** a host can opt into a machine identity explicitly, the two client-credentials
-scenarios pass, and the baseline lines for them are deleted.
+scenarios pass, and their baseline lines are deleted.
 
-### 2. Roadmap and security posture stay current
+### 2. Interactive elicitation
+
+`--elicitation defaults|decline` covers headless hosts. The REPL could prompt a human with
+the schema's form instead of applying defaults, which is the point of elicitation — and the
+one place the opt-in currently has to guess on the operator's behalf.
+
+**Done when:** the REPL renders a form (or a line-oriented prompt) from a requested schema
+and sends the answers back, and the conformance scenario still passes in defaults mode.
+
+### 3. Roadmap and security posture stay current
 
 `SECURITY.md` exists (this pass) and the private reporting channel is enabled. The
 maintenance cost is small but real: the scope section has to track what the host actually

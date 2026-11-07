@@ -309,7 +309,10 @@ async function main(): Promise<void> {
 
   const toolsets: ResourceToolset[] = serverSpecs.map((spec) =>
     isHttpServerSpec(spec)
-      ? new HttpToolset(spec.serverName, spec)
+      ? new HttpToolset(spec.serverName, {
+          ...spec,
+          ...(args.elicitation ? { elicitation: args.elicitation } : {}),
+        })
       : new StdioToolset(spec.serverName, spec),
   );
   // Resources are listed once, up front: the prompt needs an index (names + URIs),

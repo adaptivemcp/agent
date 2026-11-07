@@ -213,6 +213,30 @@ user, no authorization request and no PKCE; that is a different authentication m
 a delegation model this host has no caller for. The baseline makes a regression fail and a
 fix fail as _stale_ until the line is deleted.
 
+### The two non-auth scenarios
+
+```
+elicitation-sep1034-client-defaults    5/5     (with --call --elicitation)
+sse-retry                              3/3     (with --call)
+```
+
+Both need a **tool call**, and both first looked like client bugs when run with a bare
+listing:
+
+- **Elicitation** only happens during a tool call, and the host did not implement it at all.
+  It now does, opt-in: `--elicitation defaults` accepts with the schema's declared defaults
+  (SEP-1034), `--elicitation decline` refuses, and with neither the capability is **not
+  advertised** — a server should not ask a client that cannot answer. Only declared
+  defaults are filled; a field without one stays omitted rather than guessed. A
+  `mode: "url"` elicitation is declined, because there is no form to complete.
+- **SSE retry** reported `1/1` with two warnings when run as a listing, because the tool
+  stream never closed. With `--call` it is `3/3`: the client reconnects, respects the
+  server's `retry` timing and sends `Last-Event-ID`.
+
+That distinction is worth stating: a scenario run without the interaction it measures can
+look like a defect. The adapter takes `--call`/`--auth`/`--elicitation` so the scenario is
+given the chance to exercise what it grades.
+
 ## What running it found in the agent## What running it found in the agent
 
 The adapter's first version hung against a real HTTP server, and the cause was a genuine

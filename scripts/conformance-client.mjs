@@ -127,6 +127,10 @@ const stub = wantsToolCall
   ? await startStub(toolName, { a: 2, b: 3, text: "hi" }, "5")
   : { url: "http://127.0.0.1:1/v1", close: () => {} };
 
+// Elicitation is opt-in in the host; the SEP-1034 scenario measures default handling, so
+// the adapter advertises the capability in the mode that applies declared defaults.
+const elicitation = args.includes("--elicitation") ? ["--elicitation", "defaults"] : [];
+
 const cliArgs = wantsToolCall
   ? ["--prompt", "What is 2 + 3? Use the tool.", "--yes", "--max-steps", "3"]
   : ["--list-tools"];
@@ -135,6 +139,7 @@ const argv = [
   tsx,
   "src/cli.ts",
   ...cliArgs,
+  ...elicitation,
   "--server",
   spec,
   "--base-url",
