@@ -225,10 +225,14 @@ listing:
 
 - **Elicitation** only happens during a tool call, and the host did not implement it at all.
   It now does, opt-in: `--elicitation defaults` accepts with the schema's declared defaults
-  (SEP-1034), `--elicitation decline` refuses, and with neither the capability is **not
-  advertised** — a server should not ask a client that cannot answer. Only declared
-  defaults are filled; a field without one stays omitted rather than guessed. A
-  `mode: "url"` elicitation is declined, because there is no form to complete.
+  (SEP-1034), `--elicitation decline` refuses, and `--elicitation prompt` asks the person —
+  one line per field, typed against the schema (integer, number, boolean, enum) with the
+  declared default offered and a rejected answer asked once more before declining. With no
+  flag the capability is **not advertised**: a server should not ask a client that cannot
+  answer. Only declared defaults are filled; a field without one stays omitted. A
+  `mode: "url"` elicitation is declined, because there is no form to complete. In the REPL
+  the form uses the REPL's own reader, so it does not fight the prompt for the terminal;
+  with no TTY, prompt mode declines rather than accepting on the person's behalf.
 - **SSE retry** reported `1/1` with two warnings when run as a listing, because the tool
   stream never closed. With `--call` it is `3/3`: the client reconnects, respects the
   server's `retry` timing and sends `Last-Event-ID`.

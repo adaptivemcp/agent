@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
+import type { ElicitationAsk } from "./elicitation.js";
 import { AggregateToolset, sanitize, type ResourceToolset, type Toolset } from "./mcp/toolset.js";
 import { StdioToolset } from "./mcp/stdio.js";
 import { HttpToolset } from "./mcp/http.js";
@@ -307,11 +309,34 @@ async function main(): Promise<void> {
     }
   }
 
+  // Elicitation in `prompt` mode needs a reader. The REPL owns the terminal while it runs
+  // and installs one through `setElicitationAsk`; a one-shot run uses a throwaway readline.
+  // Without a terminal the honest answer is to decline, never to accept on the person's
+  // behalf — so the ask stays undefined.
+  const elicitationAskRef: { current?: ElicitationAsk } = {};
+  const canPrompt = process.stdin.isTTY === true;
+  const promptOnce = async (question: string): Promise<string> => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      return await rl.question(question);
+    } finally {
+      rl.close();
+    }
+  };
+  const askElicitation: ElicitationAsk | undefined =
+    args.elicitation === "prompt" && canPrompt
+      ? (question) => (elicitationAskRef.current ?? promptOnce)(question)
+      : undefined;
+  if (args.elicitation === "prompt" && !canPrompt) {
+    console.error("[elicitation] stdin is not a terminal; elicitation requests will be declined");
+  }
+
   const toolsets: ResourceToolset[] = serverSpecs.map((spec) =>
     isHttpServerSpec(spec)
       ? new HttpToolset(spec.serverName, {
           ...spec,
           ...(args.elicitation ? { elicitation: args.elicitation } : {}),
+          ...(askElicitation ? { elicitationAsk: () => elicitationAskRef.current ?? askElicitation } : {}),
         })
       : new StdioToolset(spec.serverName, spec),
   );
@@ -866,6 +891,9 @@ async function main(): Promise<void> {
           return recommendation ? JSON.stringify(recommendation, null, 2) : undefined;
         },
         decodingReport: () => runtime.decodingReport(),
+        setElicitationAsk: (ask) => {
+          elicitationAskRef.current = ask;
+        },
       });
       return;
     }

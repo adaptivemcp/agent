@@ -62,7 +62,7 @@ export interface CliArgs {
    * How to answer a server's elicitation request: apply the schema's defaults, decline, or
    * (unset) do not advertise the capability at all.
    */
-  elicitation?: "defaults" | "decline";
+  elicitation?: "defaults" | "decline" | "prompt";
   /** Poll long-running tool jobs (payloads carrying a job handle) to completion. */
   awaitJobs: boolean;
   db?: string;
@@ -272,8 +272,8 @@ export function parseFlags(argv: string[]): Partial<CliArgs> {
       }
       case "--elicitation": {
         const value = next();
-        if (value !== "defaults" && value !== "decline") {
-          throw new Error(`--elicitation expects defaults|decline, got "${value}"`);
+        if (value !== "defaults" && value !== "decline" && value !== "prompt") {
+          throw new Error(`--elicitation expects defaults|decline|prompt, got "${value}"`);
         }
         args.elicitation = value;
         break;
@@ -565,8 +565,8 @@ Options:
                                 enables failover with one fallback per decision call
                                 (default: $SYSTEM1_BACKEND, ollama)
   --elicitation <mode>          Answer server elicitation requests: defaults (apply the
-                                schema's declared defaults) or decline; unset means the
-                                capability is not advertised at all
+                                schema's declared defaults), decline, or prompt (ask in the
+                                terminal); unset means the capability is not advertised
   --default-risk <level>        Risk for tools whose server sends no MCP annotations
                                 (low|medium|high|none; default medium)
   --await-jobs                  Poll long-running tool jobs (job handles) to completion

@@ -1,6 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  createElicitationHandler,
+  type ElicitationAsk,
+  type ElicitationMode,
+} from "../elicitation.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { TOOLS_METADATA_EXTENSION } from "@adaptivemcp/spec";
 import type { ToolSpec } from "../types.js";
@@ -24,7 +29,12 @@ export interface HttpToolsetOptions {
    * to answer. `defaults` accepts with the schema's own defaults (SEP-1034); `decline`
    * refuses explicitly.
    */
-  elicitation?: "defaults" | "decline";
+  elicitation?: ElicitationMode;
+  /**
+   * The prompt used in `elicitation: "prompt"` mode. Read at request time so a REPL can
+   * install its own reader (and remove it) without rebuilding the toolset.
+   */
+  elicitationAsk?: () => ElicitationAsk | undefined;
   auth?: {
     header: () => string;
     refresh?: () => Promise<string>;
@@ -75,11 +85,17 @@ export class HttpToolset implements ResourceToolset {
     if (this.options.elicitation) {
       const mode = this.options.elicitation;
       client.setRequestHandler(ElicitRequestSchema, async (request) => {
-        if (mode === "decline") return { action: "decline" };
-        // `mode: "url"` elicitation has no form to fill; declining is the only honest answer.
-        const params = request.params as { mode?: string; requestedSchema?: unknown };
-        if (params.mode === "url") return { action: "decline" };
-        return { action: "accept", content: schemaDefaults(params.requestedSchema) };
+        const params = request.params as {
+          mode?: string;
+          message?: string;
+          requestedSchema?: unknown;
+        };
+        // The ask function is resolved per request: the REPL installs one while it owns the
+        // terminal and removes it afterwards.
+        const handler = createElicitationHandler(mode, this.options.elicitationAsk?.(), (line) =>
+          console.error(line),
+        );
+        return handler(params);
       });
     }
     await client.connect(transport);
@@ -94,7 +110,10 @@ export class HttpToolset implements ResourceToolset {
    * would lose the session id, and a 401 on `initialize` has no session to recover.
    * `input` is cloned per attempt because a `Request` body can only be consumed once.
    */
-  private async authorizedFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  private async authorizedFetch(
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> {
     const send = (refreshed?: string): Promise<Response> => {
       const target = input instanceof Request ? input.clone() : input;
       // Read the live credential per request: after a refresh, `header()` already returns
@@ -159,7 +178,10 @@ export class HttpToolset implements ResourceToolset {
     return tools.map((tool: Tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+      inputSchema: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<
+        string,
+        unknown
+      >,
       serverName: this.serverName,
       annotations: tool.annotations as Record<string, unknown> | undefined,
     }));
@@ -178,7 +200,11 @@ export class HttpToolset implements ResourceToolset {
       })) as unknown as CallToolResult;
       const output = extractOutput(result);
       if (result.isError) {
-        return { ok: false, output, error: typeof output === "string" ? output : "tool returned an error" };
+        return {
+          ok: false,
+          output,
+          error: typeof output === "string" ? output : "tool returned an error",
+        };
       }
       return { ok: true, output };
     } catch (error) {
@@ -230,7 +256,8 @@ function withAuthorization(
   refreshed?: string,
 ): RequestInit {
   const authorization =
-    refreshed ?? (typeof credentials?.authorization === "string" ? credentials.authorization : undefined);
+    refreshed ??
+    (typeof credentials?.authorization === "string" ? credentials.authorization : undefined);
   if (!authorization) return init ?? {};
   const headers = new Headers(init?.headers);
   headers.set("Authorization", authorization);
