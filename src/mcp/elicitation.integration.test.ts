@@ -22,8 +22,16 @@ function elicitingServer(
   server.registerTool(
     "ask",
     { description: "Ask the client for input", inputSchema: {} },
-    async () => {
+    async (_args, extra) => {
       if (shape === "url") {
+        // Confirm shortly after the request is in flight, so the client's bounded wait
+        // receives it rather than finding it buffered (both paths are unit-tested).
+        setTimeout(() => {
+          void extra.sendNotification({
+            method: "notifications/elicitation/complete",
+            params: { elicitationId: "el-url-1" },
+          });
+        }, 100);
         const urlResult = await server.server.elicitInput({
           mode: "url",
           message: "Authorize this device",
@@ -76,7 +84,9 @@ async function start(
   const mcp = elicitingServer(onResult, shape);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
-    enableJsonResponse: true,
+    // SSE rather than plain JSON: a completion notification has to reach the client while
+    // its elicitation request is still open.
+    enableJsonResponse: false,
   });
   await mcp.connect(transport);
   const http = createServer((request, response) => {
@@ -223,25 +233,29 @@ describe("elicitation", () => {
     });
   }, 30_000);
 
-  it("surfaces a url-mode request and accepts only after the person confirms", async () => {
+  it("accepts a url request and records the server's completion notification", async () => {
     let received: { action?: string } | undefined;
     const server = await start((result) => {
       received = result as typeof received;
     }, "url");
     running = server.server;
     const asked: string[] = [];
+    const notes: string[] = [];
     const toolset = new HttpToolset("remote", {
       serverName: "remote",
       url: server.url,
       elicitation: "prompt",
+      elicitationCompleteTimeoutMs: 2000,
       elicitationAsk: () => async (question) => {
         asked.push(question);
         return "y";
       },
+      elicitationNotify: (line) => notes.push(line),
     });
 
+    let result: Awaited<ReturnType<typeof toolset.callTool>> | undefined;
     try {
-      const result = await toolset.callTool("ask", {});
+      result = await toolset.callTool("ask", {});
       expect(result.ok, JSON.stringify(result)).toBe(true);
     } finally {
       await toolset.close();
@@ -249,6 +263,8 @@ describe("elicitation", () => {
 
     expect(received?.action).toBe("accept");
     expect(asked.at(-1)).toContain("completed the flow");
+    // The server's notification arrived and was matched, rather than the wait timing out.
+    expect(notes.join("\n")).toContain("completion confirmed by the server");
   }, 30_000);
 
   it("declines explicitly instead of accepting", async () => {

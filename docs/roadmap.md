@@ -22,21 +22,23 @@ otherwise it is a protocol feature with no product behind it.
 **Done when:** a host can delegate a scoped token to a second server on purpose, the
 scenario passes, and the baseline file is empty (and therefore deleted).
 
-### 2. Elicitation: the last edge
+### 2. Elicitation: complete
 
-The review step can now **re-open a single field** (`edit <name>`) instead of forcing a full
-re-entry, keeps the other answers, drops a field cleared during the edit, and bounds both
-unknown field names and the number of edits. Along with `mode: "url"` (link shown in prompt
-mode, non-http(s) refused unseen) and schema-typed answers, the elicitation surface is
-complete for a terminal host.
+The review step re-opens a single field (`edit <name>`), keeps every other answer, drops a
+field cleared during the edit, and bounds both unknown names and edit count. `mode: "url"`
+shows the link in prompt mode (non-http(s) refused unseen), and an accepted url flow now
+**waits briefly for the server's `notifications/elicitation/complete`** — a `CompletionTracker`
+honours either order, a buffered completion or one that arrives during the wait, and reports
+whether the server corroborated the person's answer. A timeout is not a failure: it means the
+server did not confirm, and the person's answer stands.
 
-One edge is deliberate, not missing: an accepted url flow is the person's assertion. The
-client does not poll for `notifications/elicitation/complete` to reconcile it, because
-nothing in the host consumes that signal yet — adding a reconciliation loop without a
-consumer would be state with no reader.
+One deliberate choice remains: the completion notification is used as corroboration, not as a
+gate. Requiring it would break flows against servers that never send it, and the person
+already asserted the outcome.
 
-**Done when:** a host feature (e.g. resuming a paused tool after an out-of-band approval)
-needs the completion notification; until then the assertion stands and is documented.
+**Done when:** a host feature needs a _server-gated_ url flow (e.g. resuming a paused tool
+only once the server confirms); until then the assertion plus corroboration is the honest
+contract.
 
 ### 3. Roadmap and security posture stay current
 
