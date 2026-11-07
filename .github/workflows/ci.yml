@@ -258,16 +258,14 @@ jobs:
               --output-dir "conformance-results/${scenario//\//-}"
           done
 
-      # Token exchange between applications is still not implemented; the baseline makes a
-      # regression fail and a fix fail as stale until the line is gone.
-      - name: Conformance (auth extensions, baselined)
+      # Enterprise managed OAuth (SEP-990): IdP ID token → ID-JAG → jwt-bearer assertion.
+      - name: Conformance (cross-app access)
         working-directory: agent
         run: |
           npx -y @modelcontextprotocol/conformance@0.1.16 client \
-            --command "node scripts/conformance-client.mjs --auth" \
+            --command "node scripts/conformance-client.mjs --auth --cross-app" \
             --scenario auth/cross-app-access-complete-flow \
             --timeout 60000 \
-            --expected-failures conformance-client-baseline.yml \
             --output-dir conformance-results/auth-cross-app-access-complete-flow
 
       # Both of these need a tool call: elicitation is requested during one, and the SSE

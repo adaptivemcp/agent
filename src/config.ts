@@ -33,8 +33,16 @@ export interface HttpServerOptions {
     clientMetadataUrl?: string;
     /** Env var holding a PEM private key for `private_key_jwt` client authentication. */
     clientPrivateKeyEnv?: string;
-    /** `client_credentials` is machine-to-machine: no user, no authorization request. */
-    grant?: "authorization_code" | "client_credentials";
+    /** `client_credentials` is machine-to-machine; `jwt_bearer` is enterprise managed OAuth. */
+    grant?: "authorization_code" | "client_credentials" | "jwt_bearer";
+    /** Env var holding the operator's IdP ID token (SEP-990). */
+    idTokenEnv?: string;
+    /** The IdP token endpoint (RFC 8693 token exchange). */
+    idpTokenEndpoint?: string;
+    /** The IdP client id. */
+    idpClientId?: string;
+    /** Audience for the exchange; defaults to the MCP authorization server's issuer. */
+    idpAudience?: string;
   };
   /**
    * Resolved at runtime by the CLI from `oauth`; never parsed from a spec. Separated so a
@@ -149,6 +157,10 @@ function parseServerJson(spec: string): ServerSpec {
         "clientSecretEnv",
         "clientMetadataUrl",
         "clientPrivateKeyEnv",
+        "idTokenEnv",
+        "idpTokenEndpoint",
+        "idpClientId",
+        "idpAudience",
       ] as const) {
         if (raw[key] === undefined) continue;
         if (typeof raw[key] !== "string") {
@@ -157,9 +169,14 @@ function parseServerJson(spec: string): ServerSpec {
         oauth[key] = raw[key] as string;
       }
       if (raw.grant !== undefined) {
-        if (raw.grant !== "authorization_code" && raw.grant !== "client_credentials") {
+        if (
+          raw.grant !== "authorization_code" &&
+          raw.grant !== "client_credentials" &&
+          raw.grant !== "jwt_bearer"
+        ) {
           throw new Error(
-            'invalid server spec (oauth.grant must be "authorization_code" or "client_credentials")',
+            "invalid server spec (oauth.grant must be authorization_code, client_credentials " +
+              "or jwt_bearer)",
           );
         }
         oauth.grant = raw.grant;

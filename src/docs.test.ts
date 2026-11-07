@@ -157,8 +157,8 @@ describe("documentation guards", () => {
     ]) {
       expect(ci, `CI must run ${scenario}`).toContain(scenario);
     }
-    // The remaining baseline entries are the extension scenarios, and each is named in the
-    // docs with a reason. A baseline that drifts from the workflow is dead config.
+    // Every client scenario now passes, so there is no baseline file at all; if one is
+    // reintroduced it must be referenced by the workflow and explained.
     const baseline = join(REPO, "conformance-client-baseline.yml");
     if (!ci.includes("conformance-client-baseline.yml")) {
       expect(existsSync(baseline)).toBe(false);
@@ -166,13 +166,15 @@ describe("documentation guards", () => {
     }
     expect(existsSync(baseline)).toBe(true);
     const entries = readFileSync(baseline, "utf8");
-    // The machine-to-machine scenarios now pass, so they must not be in the baseline.
-    for (const scenario of ["auth/client-credentials-basic", "auth/client-credentials-jwt"]) {
+    // Every scenario that used to be baselined now passes; none may be listed again.
+    for (const scenario of [
+      "auth/client-credentials-basic",
+      "auth/client-credentials-jwt",
+      "auth/cross-app-access-complete-flow",
+    ]) {
       expect(entries, `baseline must not list ${scenario}`).not.toContain(scenario);
       expect(ci, `CI must run ${scenario}`).toContain(scenario);
     }
-    expect(entries).toContain("auth/cross-app-access-complete-flow");
-    expect(ci).toContain("auth/cross-app-access-complete-flow");
     expect(docs).toContain("baselined");
   });
 

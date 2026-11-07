@@ -287,9 +287,19 @@ async function main(): Promise<void> {
         process.exitCode = ExitCode.Config;
         return;
       }
+      const idToken = spec.oauth.idTokenEnv ? process.env[spec.oauth.idTokenEnv] : undefined;
+      const identityProvider =
+        spec.oauth.grant === "jwt_bearer" && idToken && spec.oauth.idpTokenEndpoint
+          ? {
+              clientId: spec.oauth.idpClientId ?? spec.oauth.clientId ?? "agent",
+              idToken,
+              tokenEndpoint: spec.oauth.idpTokenEndpoint,
+              ...(spec.oauth.idpAudience ? { audience: spec.oauth.idpAudience } : {}),
+            }
+          : undefined;
       const session = await acquireToken(
         spec.url,
-        { ...spec.oauth, clientSecret, clientPrivateKey },
+        { ...spec.oauth, clientSecret, clientPrivateKey, identityProvider },
         { log: (message) => console.error(message) },
       );
       spec.headers = { ...spec.headers, Authorization: session.header() };

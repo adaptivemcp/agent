@@ -398,6 +398,87 @@ describe("OAuth discovery and authorization", () => {
     ).rejects.toThrow(/needs a pre-registered client id/);
   }, 20_000);
 
+  it("exchanges an IdP ID token for an ID-JAG, then uses it as the jwt-bearer assertion", async () => {
+    const posts: string[] = [];
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+        token_endpoint_auth_methods_supported: ["client_secret_basic"],
+      },
+      "https://idp.example/token": {
+        access_token: "the-id-jag",
+        issued_token_type: "urn:ietf:params:oauth:token-type:id-jag",
+      },
+      "https://host.example/token": { access_token: "mcp-token", token_type: "Bearer" },
+    });
+    const recordingFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/token") && init?.body) posts.push(String(init.body));
+      return (fetchImpl as unknown as typeof fetch)(input, init);
+    }) as typeof fetch;
+
+    const session = await acquireToken(
+      "https://host.example/mcp",
+      {
+        authorize: "fetch",
+        grant: "jwt_bearer",
+        clientId: "svc",
+        clientSecret: "s3cret",
+        identityProvider: {
+          clientId: "idp-client",
+          idToken: "idp-id-token",
+          tokenEndpoint: "https://idp.example/token",
+        },
+      },
+      { fetch: recordingFetch, timeoutMs: 5000 },
+    );
+
+    expect(session.header()).toBe("Bearer mcp-token");
+    const exchange = new URLSearchParams(posts[0]);
+    expect(exchange.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:token-exchange");
+    expect(exchange.get("subject_token")).toBe("idp-id-token");
+    expect(exchange.get("subject_token_type")).toBe("urn:ietf:params:oauth:token-type:id_token");
+    expect(exchange.get("requested_token_type")).toBe("urn:ietf:params:oauth:token-type:id-jag");
+    // The audience is the discovered authorization server, not a guess.
+    expect(exchange.get("audience")).toBe("https://host.example");
+    expect(exchange.get("resource")).toBe("https://host.example/mcp");
+
+    const grant = new URLSearchParams(posts[1]);
+    expect(grant.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
+    expect(grant.get("assertion")).toBe("the-id-jag");
+    // No authorization request was made in this flow.
+    expect(seen.some((url) => url.includes("/authorize"))).toBe(false);
+  }, 20_000);
+
+  it("refuses jwt_bearer without an identity provider", async () => {
+    const seen: string[] = [];
+    const fetchImpl = fakeFetch(seen, {
+      "https://host.example/.well-known/oauth-protected-resource/mcp": {
+        authorization_servers: ["https://host.example"],
+      },
+      "https://host.example/.well-known/oauth-authorization-server": {
+        issuer: "https://host.example",
+        authorization_endpoint: "https://host.example/authorize",
+        token_endpoint: "https://host.example/token",
+      },
+    });
+
+    await expect(
+      acquireToken(
+        "https://host.example/mcp",
+        { authorize: "fetch", grant: "jwt_bearer", clientId: "svc", clientSecret: "x" },
+        { fetch: fetchImpl as typeof fetch, timeoutMs: 5000 },
+      ),
+    ).rejects.toThrow(/jwt_bearer needs identityProvider/);
+  }, 20_000);
+
   it("signs a private_key_jwt assertion that verifies and names the client and server", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
     const privatePem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();

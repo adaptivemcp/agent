@@ -9,18 +9,23 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. Token exchange between applications
+### 1. Cross-application access: done, and what it needs next
 
-Every standard client scenario now passes except one: `cross-app-access-complete-flow`,
-which needs a `token-exchange` / JWT-bearer exchange into a second application. It is
-baselined with its reason, not suppressed.
+`oauth.grant: "jwt_bearer"` implements SEP-990's managed flow: the operator's IdP ID token is
+exchanged for an **ID-JAG** (RFC 8693) and presented as the `jwt-bearer` assertion. With that,
+`auth/cross-app-access-complete-flow` passes 9/9 and **the conformance baseline file is gone** —
+every client scenario the harness ships now passes.
 
-That is a delegation model rather than a grant: app A holds a token for app B and asks the
-authorization server to mint one for app C. It needs a caller that actually delegates —
-otherwise it is a protocol feature with no product behind it.
+What remains is not protocol work:
 
-**Done when:** a host can delegate a scoped token to a second server on purpose, the
-scenario passes, and the baseline file is empty (and therefore deleted).
+- a host feature that _delegates_ on purpose (app A acting for a user in app B) still has to
+  choose the identity provider and decide when delegation is allowed; the grant exists, the
+  policy does not;
+- the IdP discovery in this implementation takes the token endpoint from configuration. Reading
+  it from the IdP's OIDC document is a small gap, deliberately left until a real IdP is wired.
+
+**Done when:** a caller delegates a scoped token to a second server as policy, not as a
+conformance check.
 
 ### 2. Elicitation: complete
 
