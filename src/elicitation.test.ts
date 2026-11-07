@@ -5,6 +5,7 @@ import {
   readForm,
   renderForm,
   schemaDefaults,
+  validateValue,
 } from "./elicitation.js";
 
 /**
@@ -104,6 +105,90 @@ describe("elicitation handler", () => {
     const result = await readForm(REQUEST, async () => answers.shift() ?? "");
 
     expect(result).toEqual({ action: "decline" });
+  });
+});
+
+describe("nested object and array fields", () => {
+  const NESTED = {
+    message: "Shipping details",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        address: {
+          type: "object",
+          required: ["city"],
+          properties: { city: { type: "string" }, postcode: { type: "string" } },
+        },
+        tags: { type: "array", items: { type: "string" } },
+      },
+    },
+  };
+
+  it("parses JSON object and array answers into real values", async () => {
+    const answers = ['{"city":"Berlin","postcode":"10115"}', '["a","b"]'];
+    const result = await createElicitationHandler(
+      "prompt",
+      async () => answers.shift() ?? "",
+    )(NESTED);
+
+    expect(result).toEqual({
+      action: "accept",
+      content: { address: { city: "Berlin", postcode: "10115" }, tags: ["a", "b"] },
+    });
+  });
+
+  it("re-asks on invalid JSON and accepts the corrected document", async () => {
+    const errors: string[] = [];
+    const answers = ['{"city":', '{"city":"Berlin"}', "[]"];
+    const result = await createElicitationHandler(
+      "prompt",
+      async () => answers.shift() ?? "",
+      (line) => errors.push(line),
+    )(NESTED);
+
+    expect(result.action).toBe("accept");
+    expect((result as { content: Record<string, unknown> }).content.address).toEqual({
+      city: "Berlin",
+    });
+    expect(errors.some((line) => line.includes("expected JSON object"))).toBe(true);
+  });
+
+  it("declines after a second invalid document", async () => {
+    const answers = ["not json", "still not"];
+    const result = await createElicitationHandler(
+      "prompt",
+      async () => answers.shift() ?? "",
+    )(NESTED);
+    expect(result).toEqual({ action: "decline" });
+  });
+
+  it("rejects a document missing a required key, and one of the wrong type", () => {
+    const address = NESTED.requestedSchema.properties.address;
+    expect(() => validateValue(address, { postcode: "10115" })).toThrow(
+      /missing required key "city"/,
+    );
+    expect(() => validateValue(address, "Berlin")).toThrow(/expected a JSON object/);
+    expect(() => validateValue(address, ["Berlin"])).toThrow(/expected a JSON object/);
+    expect(() => validateValue(address, { city: 7 })).toThrow(/expected a string/);
+    expect(() => validateValue({ type: "array", items: { type: "integer" } }, [1, "two"])).toThrow(
+      /expected an integer/,
+    );
+    expect(() => validateValue({ type: "array" }, {})).toThrow(/expected a JSON array/);
+  });
+
+  it("takes an object or array default on a blank answer", () => {
+    expect(coerceAnswer({ type: "object", default: { city: "Berlin" } }, "")).toEqual({
+      city: "Berlin",
+    });
+    expect(coerceAnswer({ type: "array", default: [] }, "")).toEqual([]);
+  });
+
+  it("shows the JSON shape in the form", () => {
+    const text = renderForm(NESTED);
+    expect(text).toContain("address (object, JSON)");
+    expect(text).toContain("required keys: city");
+    expect(text).toContain("tags (array, JSON)");
+    expect(text).toContain("items: string");
   });
 });
 

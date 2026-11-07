@@ -22,19 +22,22 @@ otherwise it is a protocol feature with no product behind it.
 **Done when:** a host can delegate a scoped token to a second server on purpose, the
 scenario passes, and the baseline file is empty (and therefore deleted).
 
-### 2. Richer elicitation forms
+### 2. Elicitation ergonomics
 
-`--elicitation prompt` now reads a form line by line in the terminal (and through the REPL's
-own reader), with schema-typed answers, defaults offered, one retry on a rejected answer,
-and a decline rather than a guessed value. `defaults` and `decline` remain for headless runs.
+`--elicitation prompt` reads a form line by line (terminal or the REPL's own reader):
+schema-typed answers, defaults offered, one retry on a rejected answer, and a decline rather
+than a guessed value. **Arrays now round-trip** as parsed JSON instead of the raw typed
+string — the one real defect the "nested fields" idea turned out to contain. Nested objects
+are outside the elicitation form schema (it is flat, and the SDK enforces that), so they are
+handled defensively if a peer sends one but are not a protocol feature to chase.
 
-What it does not do yet: **nested objects and arrays** (they read as the raw string), a
-multi-field form rendered at once, and `mode: "url"` (declined, since a URL handoff has no
-console story). SEP-1034's enum titles are shown; per-field validation messages could be
-friendlier.
+Still open, and smaller than the label suggests:
 
-**Done when:** object/array fields round-trip through a small JSON editor prompt, and a
-`mode: "url"` request can be surfaced as a link the person can open.
+- a whole-form render with back-editing, instead of one field at a time;
+- `mode: "url"` requests declined rather than surfaced as a link the person can open.
+
+**Done when:** the terminal shows the whole form (or a review step) and an `url` request can
+be opened from the CLI.
 
 ### 3. Roadmap and security posture stay current
 
