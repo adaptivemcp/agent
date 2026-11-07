@@ -22,7 +22,7 @@ forgotten. `OAuthMiddleware` in `@adaptivemcp/thin-client` already handles
 401 → refresh → retry (`src/mcp/http-oauth.integration.test.ts`); what is missing is
 discovery and per-server CLI configuration.
 
-**Measured 2026-11-07:** the scenario runs; the failures are recorded in
+**Tracked:** [#108](https://github.com/adaptivemcp/agent/issues/108). **Measured 2026-11-07:** the scenario runs; the failures are recorded in
 `conformance-client-baseline.yml` with reasons, and CI enforces both directions (a
 regression fails; a fix fails as stale until the line is deleted).
 
