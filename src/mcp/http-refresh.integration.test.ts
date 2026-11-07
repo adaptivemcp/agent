@@ -38,7 +38,10 @@ describe("HttpToolset (refresh on 401)", () => {
     accepted.clear();
   });
 
-  async function start(initialBearer: string): Promise<string> {
+  async function start(
+    initialBearer: string,
+    options: { requireScopes?: string[]; granted?: Set<string> } = {},
+  ): Promise<string> {
     accepted.add(initialBearer);
     http = createServer((request, response) => {
       const authorization = request.headers.authorization ?? "";
@@ -55,6 +58,19 @@ describe("HttpToolset (refresh on 401)", () => {
       let raw = "";
       request.on("data", (chunk) => (raw += chunk));
       request.on("end", () => {
+        // A step-up: reject a tool list until the client re-authorizes with the scopes the
+        // challenge names. `granted` is mutated by the refresh/escalate double.
+        if (options.requireScopes) {
+          const missing = options.requireScopes.filter((scope) => !options.granted?.has(scope));
+          if (missing.length > 0) {
+            response.writeHead(403, {
+              "content-type": "application/json",
+              "www-authenticate": `Bearer error="insufficient_scope", scope="${missing.join(" ")}"`,
+            });
+            response.end(JSON.stringify({ error: "insufficient_scope" }));
+            return;
+          }
+        }
         let body: unknown;
         try {
           body = raw ? JSON.parse(raw) : undefined;
@@ -100,6 +116,35 @@ describe("HttpToolset (refresh on 401)", () => {
       const tools = await toolset.listTools();
       expect(tools.map((tool) => tool.name)).toContain("echo");
       expect(refreshCalls).toBe(1);
+    } finally {
+      await toolset.close();
+    }
+  }, 30_000);
+
+  it("re-authorizes when the server answers 403 insufficient_scope", async () => {
+    const granted = new Set<string>(["mcp:basic"]);
+    const url = await start("fresh-token", {
+      requireScopes: ["mcp:basic", "mcp:write"],
+      granted,
+    });
+    let escalateCalls = 0;
+    const toolset = new HttpToolset("remote", {
+      serverName: "remote",
+      url,
+      auth: {
+        header: () => "Bearer fresh-token",
+        escalate: async (scopes) => {
+          escalateCalls += 1;
+          for (const scope of scopes) granted.add(scope);
+          return "Bearer fresh-token";
+        },
+      },
+    });
+
+    try {
+      const tools = await toolset.listTools();
+      expect(tools.map((tool) => tool.name)).toContain("echo");
+      expect(escalateCalls).toBe(1);
     } finally {
       await toolset.close();
     }

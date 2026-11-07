@@ -53,7 +53,8 @@ npx -y @modelcontextprotocol/conformance@0.1.16 client \
 npx -y @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs --auth" --scenario auth/metadata-default \
   --timeout 60000 --output-dir conformance-results/auth-metadata-default
-# ...and the same loop for auth/metadata-var1 .. var3
+# ...and the same loop for auth/metadata-var1 .. var3, resource-mismatch,
+# token-endpoint-auth-basic|post|none, and (with --call) auth/scope-step-up
 ```
 
 ## Measured 2026-11-07
@@ -97,7 +98,25 @@ Passed: 13/13 — ✅ OVERALL: PASSED
 $ ... --scenario auth/metadata-var1   Passed: 13/13
 $ ... --scenario auth/metadata-var2   Passed: 13/13
 $ ... --scenario auth/metadata-var3   Passed: 13/13
+
+$ ... --scenario auth/resource-mismatch         Passed: 2/2
+$ ... --scenario auth/token-endpoint-auth-basic Passed: 18/18
+$ ... --scenario auth/token-endpoint-auth-post  Passed: 18/18
+$ ... --scenario auth/token-endpoint-auth-none  Passed: 18/18
+$ ... --scenario auth/scope-step-up             Passed: 22/22   (with --call)
 ```
+
+Those last five are security properties rather than plumbing, and each one found something:
+
+| Scenario                         | What it caught                                                                                              | Fix                                                                                                                                                          |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `auth/resource-mismatch`         | the client ignored `resource` in the PRM and would happily authorize against `https://evil.example.com/mcp` | a PRM naming a different resource is refused before any authorization request                                                                                |
+| `auth/token-endpoint-auth-basic` | the secret always went in the body (`client_secret_post`)                                                   | the registration response's `token_endpoint_auth_method`, then the server's advertised list, chooses basic/post/none; basic keeps the secret out of the body |
+| `auth/scope-step-up`             | the 401's `scope` was ignored, and a `403 insufficient_scope` was treated as a refusal                      | the initial grant requests the challenge's scope; a 403 naming more scopes re-runs the grant and retries once                                                |
+
+`auth/scope-step-up` is the one that needs a **tool call** rather than a listing: `tools/list`
+only requires `mcp:basic`, while `tools/call` requires `mcp:write` too. CI runs it with
+`--auth --call` and a scripted model asking for the harness's tool.
 
 The variants are the point rather than a bonus: each publishes the metadata somewhere
 else, and the client has to find all four shapes.
@@ -135,6 +154,10 @@ spec:
 prints the URL, and waits for the redirect a person completes; `"fetch"` performs the
 redirect itself, which is what a headless driver — the conformance adapter with `--auth` —
 uses. The adapter sets it; no environment variable or test-only branch is involved.
+
+**Scope step-up is a second grant, not a retry with the same token.** `403` with
+`error="insufficient_scope"` and a `scope` parameter triggers `escalate()`, which repeats
+discovery-free authorization (PKCE, state, resource) with the wider scope set.
 
 **Refresh is wired, on the 401 rather than the clock.** `acquireToken` returns a session
 whose `header()` is read per request; `HttpToolset` refreshes once and retries when a
