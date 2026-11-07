@@ -25,6 +25,12 @@ export interface HttpServerOptions {
     redirectUri?: string;
     clientName?: string;
     scopes?: string[];
+    /** Pre-registered client id, when the server offers no dynamic registration. */
+    clientId?: string;
+    /** Name of the environment variable holding the client secret — never the secret. */
+    clientSecretEnv?: string;
+    /** Client ID Metadata Document URL, used instead of registration when offered. */
+    clientMetadataUrl?: string;
   };
   /**
    * Resolved at runtime by the CLI from `oauth`; never parsed from a spec. Separated so a
@@ -132,7 +138,13 @@ function parseServerJson(spec: string): ServerSpec {
         }
         oauth.authorize = raw.authorize;
       }
-      for (const key of ["redirectUri", "clientName"] as const) {
+      for (const key of [
+        "redirectUri",
+        "clientName",
+        "clientId",
+        "clientSecretEnv",
+        "clientMetadataUrl",
+      ] as const) {
         if (raw[key] === undefined) continue;
         if (typeof raw[key] !== "string") {
           throw new Error(`invalid server spec (oauth.${key} must be a string)`);

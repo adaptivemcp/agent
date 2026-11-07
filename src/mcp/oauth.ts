@@ -35,8 +35,17 @@ export interface OAuthOptions {
   redirectUri?: string;
   /** Names the client at the registration endpoint. */
   clientName?: string;
-  /** Scopes to request. Empty means "whatever the server offers". */
+  /** Scopes to request. Defaults to the challenge, then the PRM's `scopes_supported`. */
   scopes?: string[];
+  /** Pre-registered client id. When set with a secret, dynamic registration is skipped. */
+  clientId?: string;
+  /** Pre-registered client secret. */
+  clientSecret?: string;
+  /**
+   * URL of this client's Client ID Metadata Document. Used as the client id when the
+   * server advertises `client_id_metadata_document_supported`, instead of registering.
+   */
+  clientMetadataUrl?: string;
 }
 
 /** A live credential for one server: current header, and a way to replace it. */
@@ -80,6 +89,7 @@ interface AuthorizationServerMetadata {
   scopes_supported?: string[];
   code_challenge_methods_supported?: string[];
   token_endpoint_auth_methods_supported?: string[];
+  client_id_metadata_document_supported?: boolean;
 }
 
 interface RegistrationResponse {
@@ -183,35 +193,52 @@ export async function acquireToken(
   // that publishes both (and traps the root) is answering the challenge, so the
   // fallback only serves servers that advertise the metadata another way.
   const challenged = await challengedMetadataUrl(resourceUrl, fetchImpl);
-  const prm = challenged.metadataUrl
-    ? await getJson<ProtectedResourceMetadata>(fetchImpl, challenged.metadataUrl, "PRM metadata")
-    : await firstJson<ProtectedResourceMetadata>(
-        fetchImpl,
-        [protectedResourceUrl(resourceUrl), protectedResourceRootUrl(resourceUrl)],
-        "PRM metadata",
-      );
+  // A 2025-03-26-era server may publish no PRM at all. That is not a failure: the origin
+  // is then the authorization server, which is the pre-RFC behaviour those deployments
+  // expect. The metadata is still used when it exists.
+  let prm: ProtectedResourceMetadata | undefined;
+  try {
+    prm = challenged.metadataUrl
+      ? await getJson<ProtectedResourceMetadata>(fetchImpl, challenged.metadataUrl, "PRM metadata")
+      : await firstJson<ProtectedResourceMetadata>(
+          fetchImpl,
+          [protectedResourceUrl(resourceUrl), protectedResourceRootUrl(resourceUrl)],
+          "PRM metadata",
+        );
+  } catch {
+    prm = undefined;
+  }
   // A PRM that names a *different* resource is not this server's metadata. Issuing a token
   // for it would send the user through an authorization server that has nothing to do with
   // the endpoint being called — the confused-deputy shape RFC 8707 exists to prevent.
-  if (prm.resource && !sameResource(prm.resource, resourceUrl)) {
+  if (prm?.resource && !sameResource(prm.resource, resourceUrl)) {
     throw new Error(
       `OAuth: protected-resource metadata is for "${prm.resource}", not "${resourceUrl}"; ` +
         "refusing to authorize against a different resource",
     );
   }
-  const issuer = prm.authorization_servers?.[0];
-  if (!issuer) {
-    throw new Error("OAuth: protected-resource metadata lists no authorization_servers");
-  }
+  const issuer = prm?.authorization_servers?.[0] ?? new URL(resourceUrl).origin;
 
   // 2. Authorization-server metadata. RFC 8414 puts the well-known segment *before* the
   // issuer's path; OpenID Discovery appends it; both spellings exist in the wild, as do
   // servers publishing only the OIDC document. Try the standard order.
-  const as = await firstJson<AuthorizationServerMetadata>(
-    fetchImpl,
-    authorizationServerMetadataUrls(issuer),
-    "authorization-server metadata",
-  );
+  let as: AuthorizationServerMetadata;
+  try {
+    as = await firstJson<AuthorizationServerMetadata>(
+      fetchImpl,
+      authorizationServerMetadataUrls(issuer),
+      "authorization-server metadata",
+    );
+  } catch {
+    // The 2025-03-26 fallback: no metadata, so the standard endpoints at the issuer root.
+    // Registration is attempted and skipped if the server does not offer it.
+    as = {
+      issuer,
+      authorization_endpoint: `${issuer.replace(/\/+$/, "")}/authorize`,
+      token_endpoint: `${issuer.replace(/\/+$/, "")}/token`,
+      registration_endpoint: `${issuer.replace(/\/+$/, "")}/register`,
+    };
+  }
   const tokenEndpoint = as.token_endpoint;
   if (!as.authorization_endpoint || !tokenEndpoint) {
     throw new Error(`OAuth: ${issuer} publishes no usable authorization_endpoint/token_endpoint`);
@@ -221,11 +248,20 @@ export async function acquireToken(
   // 3. Dynamic client registration when offered; otherwise the server must accept a
   // public client without one. The *response* decides how the token endpoint wants the
   // client authenticated — a server can register a public client and still require basic.
-  let clientId = options.clientName ?? "adaptivemcp-agent";
-  let clientSecret: string | undefined;
+  let clientId = options.clientId ?? options.clientName ?? "adaptivemcp-agent";
+  let clientSecret = options.clientSecret;
   let registeredAuthMethod: string | undefined;
-  if (as.registration_endpoint) {
-    const registration = await postJson<RegistrationResponse>(
+  // CIMD (SEP-991): the client's identity is a URL it controls, so no registration step.
+  const useCimd =
+    !options.clientId &&
+    options.clientMetadataUrl !== undefined &&
+    as.client_id_metadata_document_supported === true;
+  if (useCimd) clientId = options.clientMetadataUrl as string;
+  // A pre-registered client is an operator decision: use it and do not ask the server to
+  // mint another identity it may not support (the scenario that has no registration
+  // endpoint is exactly this case).
+  if (!options.clientId && !useCimd && as.registration_endpoint) {
+    const registration = await registerOrSkip(
       fetchImpl,
       as.registration_endpoint,
       {
@@ -235,7 +271,6 @@ export async function acquireToken(
         response_types: ["code"],
         token_endpoint_auth_method: "none",
       },
-      "client registration",
     );
     if (!registration.client_id) {
       throw new Error("OAuth: registration response has no client_id");
@@ -293,7 +328,10 @@ export async function acquireToken(
   };
 
   const initialScopes =
-    options.scopes ?? (challenged.scope ? challenged.scope.split(/\s+/).filter(Boolean) : []);
+    options.scopes ??
+    (challenged.scope ? challenged.scope.split(/\s+/).filter(Boolean) : undefined) ??
+    prm?.scopes_supported ??
+    [];
   let current = await authorizeOnce(initialScopes);
 
   return {
@@ -556,6 +594,25 @@ async function getJson<T>(fetchImpl: typeof fetch, url: string, what: string): P
     throw new Error(`OAuth: ${what} at ${url} returned ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Dynamic registration, tolerating a server that advertises no registration at all.
+ *
+ * A 404 means "register somewhere else"; the client falls back to a public identity instead
+ * of failing the whole login, which is what an operator on such a server wants.
+ */
+async function registerOrSkip(
+  fetchImpl: typeof fetch,
+  url: string,
+  payload: unknown,
+): Promise<RegistrationResponse> {
+  try {
+    return await postJson<RegistrationResponse>(fetchImpl, url, payload, "client registration");
+  } catch (error) {
+    if (error instanceof Error && /returned 404/.test(error.message)) return {};
+    throw error;
+  }
 }
 
 async function postJson<T>(

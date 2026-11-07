@@ -9,25 +9,19 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. The remaining OAuth scenarios
+### 1. Machine-to-machine and delegation grants
 
-Four metadata shapes, resource mismatch, the three token-endpoint auth styles and scope
-step-up now pass (13/13, 2/2, 18/18 each, 22/22 for step-up). Each was a real defect before
-it was a green check: metadata discovery order, resource binding, client authentication, and
-step-up re-authorization.
+The interactive side of OAuth is measured: 19 client scenarios pass, and the three that do
+not are **baselined with reasons** — `client-credentials-basic`, `client-credentials-jwt`
+and `cross-app-access-complete-flow` (see `docs/conformance-client.md`).
 
-Still unmeasured, and worth it because each is a distinct trust decision:
+They are one coherent next step rather than three: a **non-interactive grant mode**
+(`oauth.grant: "client_credentials"`, no authorization request, no PKCE) and the signed-JWT
+assertion for `client-credentials-jwt`. Token exchange between applications is a further
+step and needs a caller that actually delegates.
 
-- **`auth/basic-cimd`** — Client ID Metadata Documents: using a URL as the client id instead
-  of dynamic registration.
-- **`auth/pre-registration`**, **`auth/client-credentials-jwt`**,
-  **`auth/client-credentials-basic`** — a pre-registered client, and machine-to-machine
-  grants where no human is in the loop.
-- **`auth/2025-03-26-oauth-*`** — the pre-RFC metadata fallbacks, which older deployments
-  still publish.
-
-**Done when:** each runs and either passes or is baselined with a reason, as the last batch
-was.
+**Done when:** a host can opt into a machine identity explicitly, the two client-credentials
+scenarios pass, and the baseline lines for them are deleted.
 
 ### 2. Roadmap and security posture stay current
 

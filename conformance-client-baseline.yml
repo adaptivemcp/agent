@@ -1,0 +1,33 @@
+# Client conformance baseline — known failures, in the harness's own format.
+#
+# An entry is `<scenario>` for a whole scenario, or `<scenario>:<check-id>` for one check.
+# The harness's exit-code rules make this symmetric:
+#
+#   fails + listed     → 0  (expected)
+#   fails + not listed → 1  (regression)
+#   passes + listed    → 1  (stale entry — remove it)
+#   passes + not listed → 0
+#
+# So an entry is a measured gap with a reason, not a suppression: when the work lands, the
+# entry starts passing and CI fails until it is deleted.
+client:
+  # --- Machine-to-machine grants, which this client does not implement.
+  #
+  # Measured 2026-11-07 on conformance@0.1.16: the client completes discovery and then
+  # requests `grant_type=authorization_code`, while these scenarios only accept
+  # `client_credentials` (basic) or `client_credentials` with a signed JWT assertion.
+  #
+  # That is accurate rather than a bug: the agent is an interactive host, and a
+  # client-credentials grant has no user, no authorization request and no PKCE — it is a
+  # different authentication model (SEP-1046), not a variation on this one. Supporting it
+  # means choosing an M2M mode explicitly and never mixing the two.
+  - auth/client-credentials-basic
+  - auth/client-credentials-jwt
+
+  # --- Token exchange between applications (extension, multiple hops).
+  #
+  # Measured the same day: the client completes the first app's flow and never performs the
+  # `token-exchange` / JWT-bearer exchange into the second app. That is a cross-application
+  # delegation model this host has no caller for; inventing the flow to satisfy a scenario
+  # would be building a feature without a consumer.
+  - auth/cross-app-access-complete-flow

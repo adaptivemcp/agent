@@ -186,6 +186,80 @@ jobs:
               --output-dir "conformance-results/${scenario//\//-}"
           done
 
+      - name: Conformance (auth scope selection + offline access)
+        working-directory: agent
+        run: |
+          for scenario in \
+            auth/scope-from-www-authenticate \
+            auth/scope-from-scopes-supported \
+            auth/scope-omitted-when-undefined \
+            auth/scope-retry-limit \
+            auth/offline-access-scope \
+            auth/offline-access-not-supported; do
+            npx -y @modelcontextprotocol/conformance@0.1.16 client \
+              --command "node scripts/conformance-client.mjs --auth" \
+              --scenario "$scenario" \
+              --timeout 60000 \
+              --output-dir "conformance-results/${scenario//\//-}"
+          done
+
+      # 2025-03-26 deployments publish no PRM and may publish no metadata at all; no client
+      # identity is configured here, so dynamic registration is exercised.
+      - name: Conformance (auth legacy metadata fallbacks)
+        working-directory: agent
+        run: |
+          for scenario in \
+            auth/2025-03-26-oauth-metadata-backcompat \
+            auth/2025-03-26-oauth-endpoint-fallback; do
+            npx -y @modelcontextprotocol/conformance@0.1.16 client \
+              --command "node scripts/conformance-client.mjs --auth" \
+              --scenario "$scenario" \
+              --timeout 60000 \
+              --output-dir "conformance-results/${scenario//\//-}"
+          done
+
+      # The client's identity is configuration: CIMD uses a metadata-document URL,
+      # pre-registration uses an operator-supplied id and secret.
+      - name: Conformance (auth CIMD)
+        working-directory: agent
+        env:
+          CONFORMANCE_CLIENT_METADATA_URL: https://conformance-test.local/client-metadata.json
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --auth" \
+            --scenario auth/basic-cimd \
+            --timeout 60000 \
+            --output-dir conformance-results/auth-basic-cimd
+
+      - name: Conformance (auth pre-registration)
+        working-directory: agent
+        env:
+          CONFORMANCE_CLIENT_ID: pre-registered-client
+          CONFORMANCE_CLIENT_SECRET: pre-registered-secret
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 client \
+            --command "node scripts/conformance-client.mjs --auth" \
+            --scenario auth/pre-registration \
+            --timeout 60000 \
+            --output-dir conformance-results/auth-pre-registration
+
+      # Extensions this host does not implement (machine-to-machine grants, token exchange).
+      # The baseline makes a regression fail and a fix fail as stale until the line is gone.
+      - name: Conformance (auth extensions, baselined)
+        working-directory: agent
+        run: |
+          for scenario in \
+            auth/client-credentials-basic \
+            auth/client-credentials-jwt \
+            auth/cross-app-access-complete-flow; do
+            npx -y @modelcontextprotocol/conformance@0.1.16 client \
+              --command "node scripts/conformance-client.mjs --auth" \
+              --scenario "$scenario" \
+              --timeout 60000 \
+              --expected-failures conformance-client-baseline.yml \
+              --output-dir "conformance-results/${scenario//\//-}"
+          done
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
