@@ -14,7 +14,7 @@
  *   npx @modelcontextprotocol/conformance client \
  *     --command "node scripts/conformance-client.mjs" --scenario initialize
  */
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -98,35 +98,38 @@ const spec = JSON.stringify({ name: "conformance", url });
 // `--call` makes the adapter exercise the tool path: a stub model asks for the harness's
 // tool once. Without it the adapter only connects and lists tools (the `initialize` shape).
 const wantsToolCall = args.includes("--call");
+const toolName = process.env.CONFORMANCE_TOOL ?? "conformance_add_numbers";
 const stub = wantsToolCall
-  ? await startStub("conformance_add_numbers", { a: 2, b: 3 }, "5")
+  ? await startStub(toolName, { a: 2, b: 3, text: "hi" }, "5")
   : { url: "http://127.0.0.1:1/v1", close: () => {} };
 
 const cliArgs = wantsToolCall
   ? ["--prompt", "What is 2 + 3? Use the tool.", "--yes", "--max-steps", "3"]
   : ["--list-tools"];
 
-const run = spawnSync(
-  process.execPath,
-  [
-    tsx,
-    "src/cli.ts",
-    ...cliArgs,
-    "--server",
-    spec,
-    "--base-url",
-    stub.url,
-    "--api-key",
-    "conformance",
-    "--no-ollama",
-    "--no-stream",
-    "--db",
-    ":memory:",
-    "--session",
-    "conformance",
-  ],
-  { cwd: root, stdio: "inherit" },
-);
+const argv = [
+  tsx,
+  "src/cli.ts",
+  ...cliArgs,
+  "--server",
+  spec,
+  "--base-url",
+  stub.url,
+  "--api-key",
+  "conformance",
+  "--no-ollama",
+  "--no-stream",
+  "--db",
+  ":memory:",
+  "--session",
+  "conformance",
+];
+
+// Asynchronous: `spawnSync` would block this process's event loop, and in `--call` mode the
+// scripted model this process serves lives on that loop. The child would then wait forever
+// for a model that cannot answer — the exact hang the harness reports as a client timeout.
+const child = spawn(process.execPath, argv, { cwd: root, stdio: "inherit" });
+const status = await new Promise((resolve) => child.on("close", (code) => resolve(code)));
 
 stub.close();
-process.exit(run.status ?? 1);
+process.exit(status ?? 1);
