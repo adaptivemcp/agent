@@ -105,6 +105,29 @@ const preRegistered = process.env.CONFORMANCE_CLIENT_ID
     }
   : {};
 const clientMetadataUrl = process.env.CONFORMANCE_CLIENT_METADATA_URL;
+// The harness hands scenario context (client id, secret, or a private key) to the client
+// through this variable; a deployment would read the same values from its own config.
+let context = {};
+try {
+  context = JSON.parse(process.env.MCP_CONFORMANCE_CONTEXT ?? "{}");
+} catch {
+  context = {};
+}
+const machineToMachine = args.includes("--client-credentials");
+if (machineToMachine && context.client_secret) {
+  process.env.CONFORMANCE_CLIENT_SECRET = context.client_secret;
+}
+if (machineToMachine && context.private_key_pem) {
+  process.env.CONFORMANCE_PRIVATE_KEY = context.private_key_pem;
+}
+const clientCredentials = machineToMachine
+  ? {
+      grant: "client_credentials",
+      clientId: context.client_id ?? process.env.CONFORMANCE_CLIENT_ID,
+      ...(context.client_secret ? { clientSecretEnv: "CONFORMANCE_CLIENT_SECRET" } : {}),
+      ...(context.private_key_pem ? { clientPrivateKeyEnv: "CONFORMANCE_PRIVATE_KEY" } : {}),
+    }
+  : {};
 const spec = JSON.stringify({
   name: "conformance",
   url,
@@ -113,6 +136,7 @@ const spec = JSON.stringify({
         oauth: {
           authorize: "fetch",
           ...preRegistered,
+          ...clientCredentials,
           ...(clientMetadataUrl ? { clientMetadataUrl } : {}),
         },
       }

@@ -31,6 +31,10 @@ export interface HttpServerOptions {
     clientSecretEnv?: string;
     /** Client ID Metadata Document URL, used instead of registration when offered. */
     clientMetadataUrl?: string;
+    /** Env var holding a PEM private key for `private_key_jwt` client authentication. */
+    clientPrivateKeyEnv?: string;
+    /** `client_credentials` is machine-to-machine: no user, no authorization request. */
+    grant?: "authorization_code" | "client_credentials";
   };
   /**
    * Resolved at runtime by the CLI from `oauth`; never parsed from a spec. Separated so a
@@ -144,12 +148,21 @@ function parseServerJson(spec: string): ServerSpec {
         "clientId",
         "clientSecretEnv",
         "clientMetadataUrl",
+        "clientPrivateKeyEnv",
       ] as const) {
         if (raw[key] === undefined) continue;
         if (typeof raw[key] !== "string") {
           throw new Error(`invalid server spec (oauth.${key} must be a string)`);
         }
         oauth[key] = raw[key] as string;
+      }
+      if (raw.grant !== undefined) {
+        if (raw.grant !== "authorization_code" && raw.grant !== "client_credentials") {
+          throw new Error(
+            'invalid server spec (oauth.grant must be "authorization_code" or "client_credentials")',
+          );
+        }
+        oauth.grant = raw.grant;
       }
       if (raw.scopes !== undefined) {
         if (!Array.isArray(raw.scopes) || raw.scopes.some((s) => typeof s !== "string")) {

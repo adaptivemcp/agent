@@ -277,7 +277,9 @@ async function main(): Promise<void> {
       // in a config file that gets committed.
       const secretEnv = spec.oauth.clientSecretEnv;
       const clientSecret = secretEnv ? process.env[secretEnv] : undefined;
-      if (secretEnv && !clientSecret) {
+      const keyEnv = spec.oauth.clientPrivateKeyEnv;
+      const clientPrivateKey = keyEnv ? process.env[keyEnv] : undefined;
+      if (secretEnv && !clientSecret && !clientPrivateKey) {
         console.error(
           `error: OAuth for server "${spec.serverName}" needs $${secretEnv} for the ` +
             "pre-registered client secret",
@@ -287,7 +289,7 @@ async function main(): Promise<void> {
       }
       const session = await acquireToken(
         spec.url,
-        { ...spec.oauth, clientSecret },
+        { ...spec.oauth, clientSecret, clientPrivateKey },
         { log: (message) => console.error(message) },
       );
       spec.headers = { ...spec.headers, Authorization: session.header() };

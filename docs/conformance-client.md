@@ -186,8 +186,8 @@ scope-retry-limit                22/22      basic-cimd                      13/1
 offline-access-scope             14/14
 offline-access-not-supported     14/14
 
-client-credentials-basic          9/11      baselined — no client_credentials mode
-client-credentials-jwt            9/11      baselined — no signed-JWT assertion
+client-credentials-basic          8/8       (with --client-credentials)
+client-credentials-jwt            8/8       (with --client-credentials)
 cross-app-access-complete-flow    9/11      baselined — no token exchange
 ```
 

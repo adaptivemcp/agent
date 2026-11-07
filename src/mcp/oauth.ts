@@ -17,7 +17,7 @@
  *   long session is a known gap, recorded in `docs/conformance-client.md`.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID, sign } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -46,6 +46,17 @@ export interface OAuthOptions {
    * server advertises `client_id_metadata_document_supported`, instead of registering.
    */
   clientMetadataUrl?: string;
+  /**
+   * PEM private key for `private_key_jwt` client authentication (ES256). Required when the
+   * server only advertises that method.
+   */
+  clientPrivateKey?: string;
+  /**
+   * `authorization_code` (default) is the interactive flow. `client_credentials` is
+   * machine-to-machine: no user, no authorization request, no PKCE — a different model, so
+   * it has to be chosen deliberately.
+   */
+  grant?: "authorization_code" | "client_credentials";
 }
 
 /** A live credential for one server: current header, and a way to replace it. */
@@ -103,7 +114,7 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_REDIRECT_URI = "http://127.0.0.1:8765/oauth/callback";
 
 /** How the token endpoint expects the client to authenticate. */
-type TokenAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+type TokenAuthMethod = "client_secret_basic" | "client_secret_post" | "private_key_jwt" | "none";
 
 /**
  * Pick the registration response's choice first, then the authorization server's advertised
@@ -114,28 +125,74 @@ function chooseTokenAuthMethod(
   registered: string | undefined,
   clientSecret: string | undefined,
   supported: string[] | undefined,
+  hasPrivateKey = false,
 ): TokenAuthMethod {
-  if (registered === "client_secret_basic" || registered === "client_secret_post" || registered === "none") {
+  if (
+    registered === "client_secret_basic" ||
+    registered === "client_secret_post" ||
+    registered === "private_key_jwt" ||
+    registered === "none"
+  ) {
     return registered;
   }
+  if (hasPrivateKey && supported?.includes("private_key_jwt")) return "private_key_jwt";
   if (!clientSecret) return "none";
   if (supported?.includes("client_secret_basic")) return "client_secret_basic";
   return "client_secret_post";
 }
 
 /** Apply the chosen client authentication to a token request. */
-function applyClientAuth(
+async function applyClientAuth(
   body: URLSearchParams,
   method: TokenAuthMethod,
   clientId: string,
   clientSecret: string | undefined,
-): Record<string, string> {
+  clientPrivateKey: string | undefined,
+  audience: string,
+): Promise<Record<string, string>> {
   if (method === "client_secret_basic" && clientSecret) {
     const encoded = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
     return { authorization: `Basic ${encoded}` };
   }
   if (method === "client_secret_post" && clientSecret) body.set("client_secret", clientSecret);
+  if (method === "private_key_jwt") {
+    if (!clientPrivateKey) {
+      throw new Error("OAuth: the server requires private_key_jwt but no private key is configured");
+    }
+    body.set(
+      "client_assertion_type",
+      "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+    );
+    body.set("client_assertion", privateKeyAssertion(clientId, clientPrivateKey, audience));
+  }
   return {};
+}
+
+/**
+ * A short-lived ES256 assertion (RFC 7523). `iss` and `sub` are the client id because this
+ * authenticates the *client*, not a user; `aud` is the authorization server.
+ */
+export function privateKeyAssertion(clientId: string, privateKeyPem: string, audience: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url(Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })));
+  const payload = base64url(
+    Buffer.from(
+      JSON.stringify({
+        iss: clientId,
+        sub: clientId,
+        aud: audience,
+        iat: now,
+        exp: now + 300,
+        jti: randomUUID(),
+      }),
+    ),
+  );
+  const signingInput = `${header}.${payload}`;
+  const signature = sign("sha256", Buffer.from(signingInput), {
+    key: privateKeyPem,
+    dsaEncoding: "ieee-p1363",
+  });
+  return `${signingInput}.${base64url(signature)}`;
 }
 
 /**
@@ -250,6 +307,7 @@ export async function acquireToken(
   // client authenticated — a server can register a public client and still require basic.
   let clientId = options.clientId ?? options.clientName ?? "adaptivemcp-agent";
   let clientSecret = options.clientSecret;
+  const clientPrivateKey = options.clientPrivateKey;
   let registeredAuthMethod: string | undefined;
   // CIMD (SEP-991): the client's identity is a URL it controls, so no registration step.
   const useCimd =
@@ -283,7 +341,53 @@ export async function acquireToken(
     registeredAuthMethod,
     clientSecret,
     as.token_endpoint_auth_methods_supported,
+    clientPrivateKey !== undefined,
   );
+
+  // Machine-to-machine: no user, so no authorization request and no PKCE — the token is the
+  // whole flow. Deliberately a separate branch rather than a switch inside the interactive
+  // one, because mixing the two is how a host accidentally mints a machine token for a
+  // person (or the reverse).
+  if (options.grant === "client_credentials") {
+    if (!options.clientId || (!options.clientSecret && !clientPrivateKey)) {
+      throw new Error(
+        "OAuth: client_credentials needs a pre-registered client id and secret or private key",
+      );
+    }
+    const audience = as.issuer ?? issuer;
+    const requestToken = async (scopes: string[]): Promise<TokenResponse> => {
+      const body = new URLSearchParams({ grant_type: "client_credentials", resource: resourceUrl });
+      if (scopes.length > 0) body.set("scope", scopes.join(" "));
+      const headers = await applyClientAuth(
+        body,
+        tokenAuthMethod,
+        options.clientId as string,
+        clientSecret,
+        clientPrivateKey,
+        audience,
+      );
+      return tokenRequest(fetchImpl, tokenEndpoint, body, headers);
+    };
+    const initial =
+      options.scopes ?? (prm?.scopes_supported ? prm.scopes_supported : []);
+    let machine = await requestToken(initial);
+    return {
+      header: () => `${machine.tokenType} ${machine.accessToken}`,
+      // No refresh token exists in this grant: a "refresh" is another client_credentials
+      // request, which is exactly what the token endpoint expects.
+      refresh: async () => {
+        machine = await requestToken(initial);
+        return `${machine.tokenType} ${machine.accessToken}`;
+      },
+      escalate: async () => {
+        throw new Error("OAuth: client_credentials has no interactive step-up");
+      },
+      ...(machine.expiresAt ? { expiresAt: machine.expiresAt } : {}),
+      ...(machine.scope ? { scope: machine.scope } : {}),
+      issuer: as.issuer ?? issuer,
+      clientId: options.clientId as string,
+    };
+  }
 
   /** One authorization-code grant. Called again, with more scopes, on a step-up. */
   const authorizeOnce = async (scopes: string[]): Promise<TokenResponse> => {
@@ -320,7 +424,14 @@ export async function acquireToken(
         code_verifier: verifier,
         resource: resourceUrl,
       });
-      const headers = applyClientAuth(body, tokenAuthMethod, clientId, clientSecret);
+      const headers = await applyClientAuth(
+        body,
+        tokenAuthMethod,
+        clientId,
+        clientSecret,
+        clientPrivateKey,
+        as.issuer ?? issuer,
+      );
       return tokenRequest(fetchImpl, tokenEndpoint, body, headers);
     } finally {
       callback?.close();
@@ -346,7 +457,14 @@ export async function acquireToken(
         client_id: clientId,
         resource: resourceUrl,
       });
-      const headers = applyClientAuth(body, tokenAuthMethod, clientId, clientSecret);
+      const headers = await applyClientAuth(
+        body,
+        tokenAuthMethod,
+        clientId,
+        clientSecret,
+        clientPrivateKey,
+        as.issuer ?? issuer,
+      );
       const refreshed = await tokenRequest(fetchImpl, tokenEndpoint, body, headers);
       // A refresh response may omit `refresh_token`; keep the one that still works.
       current = { ...refreshed, refreshToken: refreshed.refreshToken ?? current.refreshToken };

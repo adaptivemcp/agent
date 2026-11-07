@@ -9,21 +9,18 @@ repo is an SDK, but because it is a fair list of things a host either has or doe
 
 ## Now
 
-### 1. Machine-to-machine and delegation grants
+### 1. Token exchange between applications
 
-Every client conformance scenario the harness ships with the standard suite now runs:
-**20 pass, 3 are baselined with reasons** (`client-credentials-basic`,
-`client-credentials-jwt`, `cross-app-access-complete-flow` — see
-`docs/conformance-client.md`). Elicitation defaults and SSE retry closed the last two
-measurements.
+Every standard client scenario now passes except one: `cross-app-access-complete-flow`,
+which needs a `token-exchange` / JWT-bearer exchange into a second application. It is
+baselined with its reason, not suppressed.
 
-The baselined three are one coherent next step: a **non-interactive grant mode**
-(`client_credentials`, no authorization request, no PKCE), the signed-JWT assertion for
-`client-credentials-jwt`, and — separately, needing a real delegating caller — token
-exchange between applications.
+That is a delegation model rather than a grant: app A holds a token for app B and asks the
+authorization server to mint one for app C. It needs a caller that actually delegates —
+otherwise it is a protocol feature with no product behind it.
 
-**Done when:** a host can opt into a machine identity explicitly, the two client-credentials
-scenarios pass, and their baseline lines are deleted.
+**Done when:** a host can delegate a scoped token to a second server on purpose, the
+scenario passes, and the baseline file is empty (and therefore deleted).
 
 ### 2. Richer elicitation forms
 

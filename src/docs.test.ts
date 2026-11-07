@@ -166,14 +166,13 @@ describe("documentation guards", () => {
     }
     expect(existsSync(baseline)).toBe(true);
     const entries = readFileSync(baseline, "utf8");
-    for (const scenario of [
-      "auth/client-credentials-basic",
-      "auth/client-credentials-jwt",
-      "auth/cross-app-access-complete-flow",
-    ]) {
-      expect(entries, `baseline must list ${scenario}`).toContain(scenario);
+    // The machine-to-machine scenarios now pass, so they must not be in the baseline.
+    for (const scenario of ["auth/client-credentials-basic", "auth/client-credentials-jwt"]) {
+      expect(entries, `baseline must not list ${scenario}`).not.toContain(scenario);
       expect(ci, `CI must run ${scenario}`).toContain(scenario);
     }
+    expect(entries).toContain("auth/cross-app-access-complete-flow");
+    expect(ci).toContain("auth/cross-app-access-complete-flow");
     expect(docs).toContain("baselined");
   });
 
