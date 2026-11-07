@@ -80,4 +80,44 @@ describe("documentation guards", () => {
     }
     expect(missing, `cited paths that do not exist:\n${missing.join("\n")}`).toEqual([]);
   });
+
+  /**
+   * A doc that says "we do not run X" while CI runs X is worse than no doc: it reads as
+   * a deliberate, verified limitation. These three checks bind the prose to the code it
+   * describes, which is the drift the path/link guards cannot see.
+   */
+  it("the conformance claim in docs/sdk-tiers.md matches the CI workflow", () => {
+    const ci = readFileSync(join(REPO, ".github/workflows/ci.yml"), "utf8");
+    const tiers = readFileSync(join(REPO, "docs/sdk-tiers.md"), "utf8");
+    const runsHarness =
+      /^\s{2}conformance-client:/m.test(ci) && /@modelcontextprotocol\/conformance@/.test(ci);
+    if (!runsHarness) return;
+
+    // The job must actually have an adapter to drive, and the doc must point at both.
+    expect(existsSync(join(REPO, "scripts/conformance-client.mjs"))).toBe(true);
+    expect(tiers).toContain("conformance-client");
+    expect(tiers).not.toContain("We do not run");
+    // AGENTS.md summarised the gaps too; the conformance item is no longer one of them.
+    expect(readFileSync(join(REPO, "AGENTS.md"), "utf8")).not.toContain("no conformance run");
+  });
+
+  it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {
+    const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    const sdk = pkg.dependencies["@modelcontextprotocol/sdk"];
+    const tiers = readFileSync(join(REPO, "docs/sdk-tiers.md"), "utf8");
+
+    expect(sdk, "the SDK must be a declared dependency").toBeDefined();
+    expect(tiers, `docs/sdk-tiers.md must quote ${String(sdk)}`).toContain(String(sdk));
+  });
+
+  it("no doc claims stdio is the only transport while an HTTP client exists", () => {
+    // The rule used to be true and is easy to copy forward. `HttpToolset` is real
+    // (`src/mcp/http.ts`, `--server` JSON with a `url`), so the claim is now wrong.
+    if (!existsSync(join(REPO, "src/mcp/http.ts"))) return;
+
+    const offenders = files.filter((file) => /stdio MCP only/i.test(readFileSync(file, "utf8")));
+    expect(offenders.map((file) => file.slice(REPO.length))).toEqual([]);
+  });
 });
