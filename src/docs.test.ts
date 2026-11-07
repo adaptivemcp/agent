@@ -133,20 +133,18 @@ describe("documentation guards", () => {
     expect(readFileSync(security, "utf8")).toContain("Report a vulnerability");
   });
 
-  it("the conformance baseline is a real file the CI step references", () => {
-    // A baseline that drifts from the workflow is either dead config or a silently
-    // unmeasured gap. Both directions matter: the file must exist, list the scenario the
-    // step runs, and be explained in the docs.
+  it("the auth scenario is documented as passing, and CI runs it with --auth", () => {
+    // The OAuth flow is easy to regress silently: without `--auth` the scenario still
+    // runs but the client never reads its 401 challenge, so it would fail loudly — but the
+    // docs would keep claiming a flow that is no longer exercised.
     const ci = readFileSync(join(REPO, ".github/workflows/ci.yml"), "utf8");
-    if (!ci.includes("conformance-client-baseline.yml")) return;
+    const docs = readFileSync(join(REPO, "docs/conformance-client.md"), "utf8");
+    if (!docs.includes("auth/metadata-default")) return;
 
-    const baseline = join(REPO, "conformance-client-baseline.yml");
-    expect(existsSync(baseline), "the referenced baseline file must exist").toBe(true);
-    const text = readFileSync(baseline, "utf8");
-    expect(text).toContain("auth/metadata-default");
-    // The entries are measured gaps, and the docs have to say so rather than leaving a
-    // reader to guess whether this is a suppression.
-    expect(readFileSync(join(REPO, "docs/conformance-client.md"), "utf8")).toContain("baselined");
+    expect(ci).toContain("--scenario auth/metadata-default");
+    expect(ci).toContain("conformance-client.mjs --auth");
+    // A baseline that is no longer needed is dead config; the file is gone.
+    expect(existsSync(join(REPO, "conformance-client-baseline.yml"))).toBe(false);
   });
 
   it("the SDK version quoted in docs/sdk-tiers.md is the one we depend on", () => {

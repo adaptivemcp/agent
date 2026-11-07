@@ -49,11 +49,10 @@ npx -y @modelcontextprotocol/conformance@0.1.16 client \
   --command "node scripts/conformance-client.mjs --call" --scenario tools_call \
   --output-dir conformance-results/tools_call
 
-# measured gap, baselined — see "Auth" below
+# OAuth discovery + PKCE — see "Auth" below
 npx -y @modelcontextprotocol/conformance@0.1.16 client \
-  --command "node scripts/conformance-client.mjs" --scenario auth/metadata-default \
-  --timeout 60000 --expected-failures conformance-client-baseline.yml \
-  --output-dir conformance-results/auth-metadata-default
+  --command "node scripts/conformance-client.mjs --auth" --scenario auth/metadata-default \
+  --timeout 60000 --output-dir conformance-results/auth-metadata-default
 ```
 
 ## Measured 2026-11-07
@@ -87,48 +86,49 @@ Getting there took two fixes, both recorded because each looked like a client bu
 No proxy was needed. The workaround under consideration (a loopback proxy holding one
 upstream session) would have hidden both causes instead of fixing them.
 
-### Auth: measured, and deliberately baselined
+### Auth: discovery and the authorization-code grant
 
 ```
-$ conformance client --command "node scripts/conformance-client.mjs" \
+$ conformance client --command "node scripts/conformance-client.mjs --auth" \
     --scenario auth/metadata-default
-Sent 401 response for POST /mcp (method: initialize)
-Client exited with code 1
-Passed: 0/5, 5 failed
-  Expected Check Missing: prm-pathbased-requested
-  Expected Check Missing: authorization-server-metadata
-  Expected Check Missing: client-registration
-  Expected Check Missing: authorization-request
-  Expected Check Missing: token-request
+Passed: 13/13 — ✅ OVERALL: PASSED
 ```
 
-The harness answers the first `POST /mcp` with `401` + `WWW-Authenticate`, and the client
-stops there. That is accurate rather than a surprise: `HttpToolset` sends **static
-headers**, and while `OAuthMiddleware` exists in `@adaptivemcp/thin-client` (covered by
-`src/mcp/http-oauth.integration.test.ts`, including a 401 → refresh → retry), the CLI has
-no per-server OAuth configuration and nothing performs protected-resource-metadata
-discovery or dynamic client registration.
+The first measurement of this scenario **failed 0/5**: the client stopped at the harness's
+`401`. That was accurate at the time — `HttpToolset` only sent static headers. It now
+implements the flow (`src/mcp/oauth.ts`), opted into per server with `oauth` in the JSON
+spec:
 
-CI runs this scenario against `conformance-client-baseline.yml`, which lists
-`auth/metadata-default`. That is a **measured gap, not a suppression** — the harness's
-rules make it symmetric:
+```json
+{ "name": "remote", "url": "https://host/mcp", "oauth": { "authorize": "browser" } }
+```
 
-| Outcome                  | Exit                            |
-| ------------------------ | ------------------------------- |
-| fails and is listed      | 0 (expected)                    |
-| fails and is not listed  | 1 (regression)                  |
-| **passes and is listed** | **1 (stale entry — delete it)** |
+- **Protected-resource metadata** at the RFC 9728 path-based location
+  (`/.well-known/oauth-protected-resource/mcp`), never the root — the root is the
+  harness's trap in this scenario.
+- **Authorization-server metadata** with the RFC 8414 path rule (the well-known segment
+  goes before the issuer's path, not after it).
+- **Dynamic client registration**, asking for a public client
+  (`token_endpoint_auth_method: "none"`).
+- **PKCE S256 on every request**, with the verifier asserted to match its challenge in
+  `src/mcp/oauth.test.ts`.
+- **The resource is named** (RFC 8707 `resource`) on both the authorization and token
+  requests, so a token cannot be replayed at a different MCP server by a confused deputy.
+- **No token is logged**: only the issuer and the client id reach the operator.
 
-Verified both directions locally: with the baseline the run exits 0 ("Baseline check
-passed: all failures are expected"); listing a scenario that passes (`initialize`) exits 1
-with "Baseline is stale". So implementing the flow cannot silently leave a stale file
-behind.
+`authorize` is the only mode switch. `"browser"` (the default) starts a loopback listener,
+prints the URL, and waits for the redirect a person completes; `"fetch"` performs the
+redirect itself, which is what a headless driver — the conformance adapter with `--auth` —
+uses. The adapter sets it; no environment variable or test-only branch is involved.
 
-The roadmap's first item is consequently narrower than "add auth conformance": implement
-PRM discovery → AS metadata → registration → authorization request → token request in the
-CLI path, then delete the baseline entry.
+Not yet implemented, and left visible rather than implied: **token refresh** inside a long
+session. The token is acquired for the run; `expires_in` is recorded.
 
-## What running it found in the agent
+CI runs this scenario with `--auth` and without any expected-failures baseline. The
+baseline from the measurement above was deleted in the same change, because a stale entry
+fails the harness — which is how the removal was caught rather than forgotten.
+
+## What running it found in the agent## What running it found in the agent
 
 The adapter's first version hung against a real HTTP server, and the cause was a genuine
 bug: **listing commands printed and returned without closing their toolsets.** A stdio
