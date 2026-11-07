@@ -27,7 +27,10 @@ What remains is not protocol work:
   choose the identity provider and decide when delegation is allowed; the grant exists, the
   policy does not;
 - token **exchange** in the other direction (accepting an ID-JAG from another app on the QC or
-  MCP side) has no caller yet.
+  MCP side) has no caller yet;
+- live `jwt_bearer` still needs an IdP that issues ID-JAGs (Keycloak does not); everything else
+  in the client is now exercised against a real provider, including the PKCE login through a
+  headless login helper.
 
 **Done when:** a caller delegates a scoped token to a second server as policy, not as a
 conformance check.
